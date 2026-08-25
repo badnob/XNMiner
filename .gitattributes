@@ -1,0 +1,19 @@
+* text=auto
+*.sh text eol=lf
+*.service text eol=lf
+*.md text eol=lf
+CMakeLists.txt text eol=lf
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.h text eol=lf
+*.cu text eol=lf
+*.ini text eol=lf
+*.example text eol=lf
+
+# GitHub Linguist treats any path named vendor/ as third-party and DROPS it
+# from the language bar. The Argon2id kernels live in vendor/kernelrunner.cu
+# (same layout as the Windows champ tree), so the repo looked like 0% CUDA.
+vendor/** linguist-vendored=false
+*.cu linguist-language=CUDA linguist-detectable=true
+vendor/kernelrunner.cu linguist-language=CUDA linguist-detectable=true linguist-vendored=false
+

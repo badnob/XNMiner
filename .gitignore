@@ -1,0 +1,9 @@
+/build/
+/data/
+/miner.ini
+*.o
+*.obj
+*.a
+*.so
+.cache/
+CMakeUserPresets.json
