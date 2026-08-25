@@ -110,7 +110,8 @@ elif [[ "${need_clone}" -eq 1 ]]; then
 fi
 
 cd "${ROOT}"
-chmod +x build.sh start-miner.sh install-deps.sh vast.sh 2>/dev/null || true
+chmod +x build.sh start-miner.sh install-deps.sh vast.sh \
+  scripts/detect-hardware.sh scripts/ensure-cuda13.sh scripts/hard-restart.sh 2>/dev/null || true
 
 if command -v nvidia-smi >/dev/null 2>&1; then
   nvidia-smi -pm 1 >/dev/null 2>&1 || true
@@ -220,7 +221,7 @@ apply_git_update() {
   fi
   echo "GitHub update ${local_sha:0:8} -> ${remote_sha:0:8} (built ${built_sha:0:8}) — rebuilding"
   git reset --hard "origin/${branch}"
-  chmod +x build.sh start-miner.sh install-deps.sh vast.sh scripts/ensure-cuda13.sh 2>/dev/null || true
+  chmod +x build.sh start-miner.sh install-deps.sh vast.sh scripts/ensure-cuda13.sh scripts/detect-hardware.sh 2>/dev/null || true
   ./build.sh
   write_build_sha
   apply_ini_env
@@ -235,7 +236,7 @@ github_remote_sha() {
   git ls-remote "https://x-access-token:${GH_TOKEN}@github.com/${REPO_SLUG}.git" refs/heads/main 2>/dev/null | awk '{print $1}'
 }
 
-echo "Building..."
+echo "Building for this GPU / CPU / VRAM..."
 ./build.sh
 write_build_sha
 apply_ini_env

@@ -9,46 +9,53 @@ if ! command -v cmake >/dev/null 2>&1; then
   exit 1
 fi
 
-# Desktop 16 MH/s is CUDA 13.3. Vast images ship 12.8 (~7 MH/s on the same kernel).
-# Install nvcc 13.x without changing the GPU driver, then compile with it.
+# GPU / CPU / VRAM → arch, lanes, compiler choice.
 # shellcheck disable=SC1091
-source "${ROOT}/scripts/ensure-cuda13.sh"
+source "${ROOT}/scripts/detect-hardware.sh"
+xn_hardware_report
+
+if [[ "${XN_UNSUPPORTED}" == "1" ]]; then
+  echo "ERROR: ${XN_UNSUPPORTED_REASON}" >&2
+  echo "This miner targets Turing (RTX 20 / GTX 16) and newer NVIDIA GPUs." >&2
+  exit 1
+fi
+
+# Blackwell: CUDA 13 nvcc matches the fast desktop SASS. Do not install it
+# on Ada/Ampere — a CUDA 13 binary needs driver 580, which those boxes often
+# do not have. Non-Blackwell keeps the image's nvcc (12.x is fine).
+if [[ "${XN_NEED_CUDA13}" == "1" ]]; then
+  # shellcheck disable=SC1091
+  source "${ROOT}/scripts/ensure-cuda13.sh" || true
+  if command -v nvcc >/dev/null 2>&1 && ! nvcc --version 2>/dev/null | grep -q 'release 13'; then
+    echo "WARNING: Blackwell GPU but nvcc is not CUDA 13. H/s will be lower. Continuing." >&2
+  fi
+fi
 
 if ! command -v nvcc >/dev/null 2>&1; then
   echo "nvcc not found. Install the NVIDIA CUDA Toolkit and put it on PATH." >&2
+  echo "Use a CUDA devel image, not a runtime-only image." >&2
   exit 1
 fi
 
 NVCC_VER="$(nvcc --version 2>/dev/null | tr '\n' ' ' || true)"
 echo "nvcc: ${NVCC_VER}"
-if ! nvcc --version 2>/dev/null | grep -q 'release 13'; then
-  echo "ERROR: need CUDA 13 nvcc (desktop 16 MH/s compiler). Have: ${NVCC_VER}" >&2
-  exit 1
-fi
 
-detect_arch() {
-  if [[ -n "${CMAKE_CUDA_ARCHITECTURES:-}" ]]; then
-    echo "${CMAKE_CUDA_ARCHITECTURES}"
-    return
-  fi
-  local cap=""
-  if command -v nvidia-smi >/dev/null 2>&1; then
-    cap="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1 | tr -d '[:space:]')"
-  fi
-  # 5090 = 12.0. Use sm_120 like the winning Windows Desktop binary
-  # (16 MH/s / 94% util). sm_120a on Vast stayed ~7 MH/s / 50% util.
-  if [[ "${cap}" == "12.0" || "${cap}" == "12.1" || -z "${cap}" ]]; then
-    echo "120"
-    return
-  fi
-  if [[ "${cap}" =~ ^([0-9]+)\.([0-9]+)$ ]]; then
-    echo "${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
-    return
-  fi
-  echo "120"
+nvcc_has_blackwell() {
+  nvcc --version 2>/dev/null | grep -qE 'release 12\.(8|9)|release 13'
 }
 
-ARCH="$(detect_arch)"
+ARCH="${XN_BUILD_ARCH}"
+if [[ "${ARCH}" == "75;86;89;90;120" ]] && ! nvcc_has_blackwell; then
+  ARCH="75;86;89;90"
+  echo "nvcc is older than 12.8 — fat cubin without sm_120"
+fi
+if [[ "${ARCH}" == *"120"* || "${ARCH}" == *"100"* ]] && ! nvcc_has_blackwell; then
+  echo "ERROR: this GPU needs nvcc 12.8+ (CUDA 13 preferred). Have: ${NVCC_VER}" >&2
+  echo "Install a CUDA devel image with 12.8/13, or run scripts/ensure-cuda13.sh" >&2
+  exit 1
+fi
+echo "Building xnminer CMAKE_CUDA_ARCHITECTURES=${ARCH} compiler=${CMAKE_CUDA_COMPILER:-nvcc} gpu=${XN_GPU_NAME:-unknown} vram=${XN_GPU_VRAM_MIB}MiB cpu=${XN_CPU_CORES} auto_lanes=${XN_SUGGESTED_LANES}"
+
 GEN=()
 if command -v ninja >/dev/null 2>&1; then
   GEN=(-G Ninja)
@@ -65,18 +72,29 @@ if [[ -n "${CUDAToolkit_ROOT:-}" ]]; then
   CMAKE_ARGS+=(-DCUDAToolkit_ROOT="${CUDAToolkit_ROOT}")
 fi
 
-echo "Building xnminer (Blackwell CUDA) CMAKE_CUDA_ARCHITECTURES=${ARCH} compiler=${CMAKE_CUDA_COMPILER:-nvcc}"
 rm -f "${BUILD}/CMakeCache.txt"
 cmake -S "${ROOT}" -B "${BUILD}" "${GEN[@]}" "${CMAKE_ARGS[@]}"
 cmake --build "${BUILD}" --parallel
 
 echo
 if command -v cuobjdump >/dev/null 2>&1 && [[ -x "${BUILD}/bin/xnminer" ]]; then
-  echo "Embedded GPU ELF (must list sm_120 / sm_120a):"
+  echo "Embedded GPU ELF (this box: sm_${XN_GPU_ARCH:-unknown}):"
   cuobjdump -lelf "${BUILD}/bin/xnminer" || true
 fi
 echo "OK: ${BUILD}/bin/xnminer"
 mkdir -p "${ROOT}/data"
+{
+  echo "arch=${ARCH}"
+  echo "gpu=${XN_GPU_NAME:-unknown}"
+  echo "sm=${XN_GPU_ARCH:-}"
+  echo "family=${XN_GPU_FAMILY:-}"
+  echo "vram_mib=${XN_GPU_VRAM_MIB}"
+  echo "cpu_cores=${XN_CPU_CORES}"
+  echo "auto_lanes=${XN_SUGGESTED_LANES}"
+  echo "auto_batch_m100=${XN_SUGGESTED_BATCH}"
+  echo "auto_keygen=${XN_SUGGESTED_KEYGEN}"
+  echo "device=${XN_DEVICE}"
+} > "${ROOT}/data/build_hw"
 nvcc --version > "${ROOT}/data/nvcc_version" 2>/dev/null || true
 if command -v git >/dev/null 2>&1 && git -C "${ROOT}" rev-parse HEAD >/dev/null 2>&1; then
   git -C "${ROOT}" rev-parse HEAD > "${ROOT}/data/build_sha"

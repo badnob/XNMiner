@@ -38,12 +38,13 @@ double bytes_per_attempt(int difficulty) {
 }
 
 int suggested_max_lanes(int total_vram_mib) {
-    // ~3.5 GiB per lane at m=100 / 80% of a 32 GB 5090 → 8 lanes.
+    // ~3.5 GiB per lane at m=100 / 80% VRAM. Works for 4 GB laptops through 32 GB 5090s.
     if (total_vram_mib >= 28000) return 8;
     if (total_vram_mib >= 22000) return 6;
     if (total_vram_mib >= 16000) return 4;
     if (total_vram_mib >= 12000) return 3;
     if (total_vram_mib >= 8000) return 2;
+    if (total_vram_mib >= 4000) return 1;
     return 1;
 }
 

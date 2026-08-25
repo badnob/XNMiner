@@ -35,22 +35,25 @@ export LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}
 ## 3. Build
 
 ```bash
+bash scripts/detect-hardware.sh   # optional preview: GPU, SM, VRAM, CPU, lanes, batch
 ./build.sh
 ```
 
 Output: `build/bin/xnminer`
 
-The script picks `CMAKE_CUDA_ARCHITECTURES` from `nvidia-smi` compute capability.
+The script picks `CMAKE_CUDA_ARCHITECTURES` from `nvidia-smi` compute capability **on this box** and writes `data/build_hw`. Lanes and batch are **not** baked in — the running miner measures VRAM and CPU again at start (`max_lanes = 0`, `batch_size = 0`, `keygen_threads = 0`).
 
-| GPU family | Typical arch |
-|------------|--------------|
-| Turing (20-series) | 75 |
-| Ampere (30-series) | 86 |
-| Ada (40-series) | 89 |
-| Hopper | 90 |
-| Blackwell (50-series) | 120 |
+| GPU family | Typical arch | Typical VRAM → lanes |
+|------------|--------------|----------------------|
+| Turing (20-series) | 75 | 8 GB → 2 |
+| Ampere (30-series) | 86 | 8 GB → 2, 12 GB → 3, 24 GB → 6 |
+| Ada (40-series) | 89 | 16 GB → 4, 24 GB → 6 |
+| Hopper | 90 | 80 GB → 8 (cap) |
+| Blackwell (50-series) | 120 | 32 GB → 8, 16 GB → 4 |
 
-Override: `CMAKE_CUDA_ARCHITECTURES=120 ./build.sh`
+Blackwell installs CUDA 13 nvcc when missing (faster SASS). 30/40-series keep CUDA 12.x. Pascal / Maxwell will not build.
+
+Override: `CMAKE_CUDA_ARCHITECTURES=86 ./build.sh`
 
 ## 4. First start (new wallet)
 
@@ -75,16 +78,18 @@ Edit `miner.ini` (created from `miner.ini.example`):
 - `[cuda] max_lanes` / `keygen_threads` / `batch_size` — leave at **0** to auto-size from this box's VRAM and CPU count
 - `[queue] desktop_cpu_cores` / `flush_cpu_cores` / `bag_sort_cpu_cores` / `dashboard_cpu_cores` — **0 = auto from nproc**. Dedicated Vast boxes keep `desktop_cpu_cores = 0`
 - `[efficiency]` VRAM 80%, mem-junc 85/81, miner power-limit **off**
-- `[mining] match_drain_parallel = 0` auto-caps `/verify` workers from flush cores
+- `[mining] match_drain_parallel = 0` auto-caps `/verify` workers from flush cores (256 / 1024 / 2048). Dummy `/verify` held 1024 in-flight with 0 timeouts; ~23k–100k POSTs per 30s at ~300ms.
 - `[queue] bag_forward_url` / `bag_forward_token` — copy queued hits to the Windows home vault
 
 ## Checks
 
 | Check | Where |
 |-------|--------|
+| Detected GPU / CPU / lanes | `bash scripts/detect-hardware.sh` or `./build/bin/xnminer --diagnose` |
 | Hashrate | Dashboard H/s |
 | Accepts | Accepted counters |
 | Logs | `data/session.log` |
+| What this binary was built for | `data/build_hw` |
 | Remote | woodyminer.com (on by default) |
 
 ## Common issues
@@ -93,7 +98,9 @@ Edit `miner.ini` (created from `miner.ini.example`):
 |---------|-----|
 | Build fails | `./install-deps.sh`; install CUDA Toolkit |
 | `nvcc not found` | Add `/usr/local/cuda/bin` to `PATH` |
-| CUDA start failed | Update NVIDIA driver; set `CMAKE_CUDA_ARCHITECTURES` for your GPU |
+| CUDA start failed | Update NVIDIA driver; `bash scripts/detect-hardware.sh` then rebuild |
+| Wrong SM cubin | Delete `build/` and run `./build.sh` on the box that will mine |
+| Pascal / 10-series | Not supported (needs Turing sm_75 or newer) |
 | Power limit fails | Run as root, or skip `gpu_power_boost_enabled` |
 | Another instance | Close the other miner or delete `data/miner.lock` |
 | Woodyminer HTTPS fails | Confirm `libcurl` is the OpenSSL build (`libcurl4-openssl-dev`) |
@@ -102,7 +109,7 @@ Edit `miner.ini` (created from `miner.ini.example`):
 
 `vast.sh` watches GitHub. When `main` moves, it SIGTERM the miner (that **bags the queue to disk**), `git pull`s, rebuilds, and starts again. The miner also self-checks every 5 minutes and exits `75` for the same path. No manual stop. Do not interrupt a match-flush window — the checker waits.
 
-When paper or `/difficulty` matches bag `m=`, CPU brute-flushes `/verify` (1024 in-flight, 2048 on 25k+ bags). A 401/timeout no longer pauses the whole bag.
+When paper or `/difficulty` matches bag `m=`, CPU brute-flushes `/verify` (256 / 1024 / 2048 in-flight from flush cores; 2048 on 25k+ bags when the box has 5+ flush cores). A 401/timeout no longer pauses the whole bag. Dummy `/verify` held 1024 in-flight with 0 timeouts (~23k–100k POSTs per 30s at ~300ms).
 
 Needs `GH_TOKEN` (already required to clone the private repo).
 

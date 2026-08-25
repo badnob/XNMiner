@@ -5,8 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/xnminer-cuda-linux
-ExecStart=/opt/xnminer-cuda-linux/build/bin/xnminer --no-dashboard
+# Edit these two paths to where you cloned the miner.
+WorkingDirectory=/opt/xnminer-low-dif-hybrid-blackwell
+ExecStart=/opt/xnminer-low-dif-hybrid-blackwell/build/bin/xnminer --no-dashboard
 Restart=on-failure
 RestartSec=10
 # First-run wallet prompt needs a TTY. Configure miner.ini address= before enabling this unit.

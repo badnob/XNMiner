@@ -18,7 +18,8 @@ int flush_cpu_count();
 int cuda_host_count();
 // Keygen workers: min(16, CUDA host CPUs), at least 2. Leaves flush/bag cores free.
 int suggested_keygen_threads();
-// IO-bound /verify cap from flush CPUs (32..2048). Small boxes stay well below 2048.
+// IO-bound /verify cap from flush CPUs (256 / 1024 / 2048).
+// 1024 in-flight held 0 timeouts on dummy /verify (2026-08-25).
 int flush_http_cap();
 
 std::string layout_summary();

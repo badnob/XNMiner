@@ -28,6 +28,10 @@ echo "  2. CUDA Toolkit with nvcc (https://developer.nvidia.com/cuda-downloads)"
 echo
 if command -v nvidia-smi >/dev/null 2>&1; then
   nvidia-smi --query-gpu=name,compute_cap,memory.total --format=csv
+  echo
+  if [[ -f "$(dirname "${BASH_SOURCE[0]}")/scripts/detect-hardware.sh" ]]; then
+    bash "$(dirname "${BASH_SOURCE[0]}")/scripts/detect-hardware.sh" || true
+  fi
 else
   echo "nvidia-smi not found yet — install the NVIDIA driver before mining."
 fi

@@ -6,6 +6,7 @@
 #include "mining/block_types.hpp"
 #include "queue/policy.hpp"
 #include "util/cpu_affinity.hpp"
+#include "util/hardware.hpp"
 #include "util/paths.hpp"
 #include "hashapi/KeygenPool.h"
 
@@ -1442,6 +1443,19 @@ void Supervisor::run(std::optional<int> max_seconds) {
 
     cpu::pin_this_thread(cpu::Role::CudaHost);
     log("info", "CPU layout: " + cpu::layout_summary());
+    {
+        const auto hw = probe_hardware(settings_.device_id);
+        log("info", "Hardware auto: " + hw.summary());
+        if (settings_.cuda_max_lanes <= 0 && hw.cuda_ok) {
+            log("info", "Lanes/batch auto from VRAM (" + std::to_string(hw.vram_mib) +
+                            " MiB → " + std::to_string(hw.suggested_lanes) + " lanes, ~" +
+                            std::to_string(hw.suggested_batch_m100) + " hashes/lane at m=100)");
+        }
+        if (settings_.keygen_threads <= 0) {
+            log("info", "Keygen auto from CPU (" + std::to_string(hw.cpu_cores) + " cores → " +
+                            std::to_string(hw.suggested_keygen) + " threads, capped by CUDA host)");
+        }
+    }
 
     if (dashboard_) {
         dashboard_->start();

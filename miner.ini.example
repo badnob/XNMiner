@@ -49,8 +49,11 @@ match_drain_min_queue = 1
 # Max seconds for one submit burst. 0 = keep flushing until the bag is empty or both oracles leave.
 match_drain_max_s = 0
 # In-flight /verify workers during match-flush (1–4096).
-# 0 = auto from this machine's flush CPU count (64 / 512 / 1024 / 2048).
-# Never exceeds that cap, so a 4-core box will not spawn 2048 HTTP threads.
+# 0 = auto from this machine's flush CPU count (256 / 1024 / 2048).
+# Mock 2026-08-25: 1024 dummy POSTs to /verify, 0 timeouts, ~230–330ms.
+# A 30s matching window at that pace is ~23k (one wave) to ~100k (sustained).
+# Never exceeds the cap, so a 4-core box will not spawn 2048 HTTP threads.
+# Leave at 0 for new hardware — the miner measures nproc at start.
 match_drain_parallel = 0
 # Max blocks to send in one burst. 0 = send the whole matching queue.
 match_drain_batch = 0
@@ -128,13 +131,14 @@ jsonl_path = data/queue.jsonl
 rejected_jsonl_path = data/rejected.jsonl
 # Old setting. Submits already run on their own CPU thread — leave at 0.30.
 submit_cpu_fraction = 0.30
-# CPU split is measured from nproc at start. 0 = auto (recommended).
+# CPU split is measured from nproc at start. 0 = auto (recommended for new users).
 # Vast / dedicated miner: desktop_cpu_cores = 0 (no cores reserved for a desktop session).
 # Linux desktop: set 2–8 to leave cores for the rest of the machine.
 desktop_cpu_cores = 0
-# 0 = auto. Typical 16-core box: bag 2, flush 4, dashboard 2, CUDA host the rest.
-# Typical 8-core box: bag 1, flush 2, dashboard 1, CUDA host the rest.
-# Typical 4-core box: flush 1, CUDA host the rest (bag/dashboard share).
+# 0 = auto from this box's core count.
+# 16-core: bag 2, flush 4, dashboard 2, CUDA host the rest.
+# 8-core:  bag 1, flush 2, dashboard 1, CUDA host the rest.
+# 4-core:  flush 1, CUDA host the rest (bag/dashboard share).
 bag_sort_cpu_cores = 0
 flush_cpu_cores = 0
 dashboard_cpu_cores = 0
@@ -183,15 +187,18 @@ token =
 sha_path = data/build_sha
 
 [cuda]
+# All 0 values below mean "measure this GPU / CPU at start". That is the
+# new-user default. Only set a number if you want to override auto-detect.
+#
 # CPU threads that generate new keys for all GPU lanes to share.
 # 0 = auto (CUDA host cores, max 16). Do not set 12 on an 8-core box — it starves the GPU.
 keygen_threads = 0
 # Which NVIDIA card to use. 0 = the first card.
 device_id = 0
-# Fixed hashes per lane. 0 = pick the size automatically from free VRAM (recommended).
+# Fixed hashes per lane. 0 = pick the size automatically from this card's VRAM (recommended).
 batch_size = 0
 # Extra cap on hashes per lane.
-# 0 = no cap, fill the VRAM target (32 GB @ 80% ≈ 8 x 28769; 16 GB ≈ 4 lanes).
+# 0 = no cap, fill the VRAM target (32 GB @ 80% ≈ 8 x 28769; 16 GB ≈ 4 lanes; 8 GB ≈ 2 lanes).
 max_batch_size = 0
 # How many GPU lanes run at once. 0 = auto from this card's total VRAM
 # (8 GB→2, 12→3, 16→4, 24→6, 32→8). Setting 8 on an 8 GB card is clamped down.

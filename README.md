@@ -2,12 +2,18 @@
 
 Pure C++/CUDA XenBlocks miner — same **champ / work-patch** engine as the fast Windows 5090 build. Hybrid force-mine `m=100`, queue until paper/`m=` matches, then flush. Version **`4.20.69-cuda-blkwll`**. **No Python.**
 
-At start the miner measures **nproc** and **GPU VRAM**, then splits work so a 4-core / 8 GB box and a 16-core / 32 GB 5090 both stay stable:
+**New hardware is auto-detected.** `build.sh` reads `nvidia-smi` (GPU name, SM arch, VRAM) and `nproc` (CPU cores). The cubin is compiled for **that** GPU. At start the miner sizes lanes, batch, keygen, and `/verify` width from this box:
 
-- CPU: bag / flush / dashboard / CUDA host slices from online cores. Flush `/verify` width is 64 / 512 / 1024 / 2048 from flush core count — never 2048 spawn-all on a small box.
-- GPU: lanes from total VRAM (~3.5 GiB/lane at m=100). 8 GB→2, 16 GB→4, 24 GB→6, 32 GB→8. Batch fills 80% VRAM.
-- Keygen: auto = CUDA host cores (max 16), pinned there so it cannot starve the kernel.
-- Power limit is left to nvidia-smi / the host panel. Memory junction hold 81 °C, cap 85 °C.
+- **Build arch:** Turing 75 / Ampere 86 / Ada 89 / Hopper 90 / Blackwell 120. Empty detect → multi-arch cubin (`75;86;89;90;120`). Override with `CMAKE_CUDA_ARCHITECTURES=86 ./build.sh`.
+- **CUDA toolkit:** Blackwell prefers CUDA 13 (faster SASS). 30/40-series keep the image’s nvcc (12.x is fine — CUDA 13 is not installed on those boxes).
+- **CPU:** bag / flush / dashboard / CUDA host from online cores. Flush `/verify` width is 256 / 1024 / 2048 from flush core count — never 2048 spawn-all on a small box. 1024 in-flight held 0 timeouts on dummy `/verify`; a 30s match window is ~23k–100k POSTs at ~300ms.
+- **GPU lanes:** from total VRAM (~3.5 GiB/lane at m=100). 8 GB→2, 16 GB→4, 24 GB→6, 32 GB→8. Batch fills 80% VRAM.
+- **Keygen:** auto = CUDA host cores (max 16), pinned there so it cannot starve the kernel.
+- **Power:** left to nvidia-smi / the host panel. Memory junction hold 81 °C, cap 85 °C.
+
+`bash scripts/detect-hardware.sh` prints the plan without mining. `./build/bin/xnminer --diagnose` dumps it as JSON.
+
+Needs an **NVIDIA Turing-or-newer** GPU (RTX 20 / GTX 16 and up). No AMD, no CPU mining, one GPU (`device_id`).
 
 GPU always keeps hashing during flush. Mixed lastblock windows keep mining while the matching bag goes out. 401/timeout does not freeze the bag.
 
@@ -49,7 +55,7 @@ cd xnminer-low-dif-hybrid-blackwell
 bash vast.sh
 ```
 
-That builds for the GPU in the box, writes `miner.ini`, and mines with the live TUI in tmux. Optional: `export WORKER=vast-1 DEVICE=0` before `bash vast.sh`.
+That detects the GPU in the box (SM + VRAM + CPU), builds the matching cubin, writes `miner.ini` with auto lanes/batch/CPU (`0` = measure at start), and mines with the live TUI in tmux. Optional: `export WORKER=vast-1 DEVICE=0` before `bash vast.sh`.
 
 Watch it over SSH (same Campbell dashboard theme as the Windows miner — no tmux status bar):
 ```bash
@@ -88,7 +94,7 @@ First run prompts for a `0x` wallet (or set `address =` in `miner.ini`).
 ./build/bin/xnminer --diagnose
 ```
 
-`build.sh` picks `CMAKE_CUDA_ARCHITECTURES` from `nvidia-smi` (75 / 86 / 89 / 90 / 120). Override with `CMAKE_CUDA_ARCHITECTURES=120 ./build.sh`.
+`build.sh` picks `CMAKE_CUDA_ARCHITECTURES` from `nvidia-smi` (75 / 86 / 89 / 90 / 120) and sizes lanes/batch from VRAM. Override with `CMAKE_CUDA_ARCHITECTURES=120 ./build.sh`. Preview: `bash scripts/detect-hardware.sh`.
 
 ---
 
@@ -96,15 +102,16 @@ First run prompts for a `0x` wallet (or set `address =` in `miner.ini`).
 
 | Feature | State |
 |---------|--------|
-| Hybrid force-mine `m=100` + paper-oracle brute flush (1024–2048 parallel) | on |
+| Hybrid force-mine `m=100` + paper-oracle brute flush | on (`/verify` width auto from CPU) |
+| Auto GPU arch / VRAM lanes / CPU split | **on** — `0` in `miner.ini` means measure this box |
 | Auto-update from GitHub (bag queue, rebuild, restart) | on |
 | XUNI hunting | **off** — GPU stays on XNM/XBLK; queued XUNI still flush `:55–:04` |
 | Woodyminer upload | on |
-| 8 CUDA lanes | on |
-| VRAM % cap / desktop headroom | **off** — pack the card |
-| Temp limit / cooldown / thermal batch derate | **off** |
-| Safety supervisor (stop GPU on temp/VRAM) | **off** |
-| Keygen CPU pin (old 6-core lock) | **off** — `hardware_concurrency` threads, unpinned |
+| CUDA lanes | **auto** from VRAM (not stuck at 8) |
+| VRAM pack | **on** — 80% target, 20% desktop headroom |
+| Memory-junction thermal hunt | **on** — hold 81 °C / cap 85 °C, batch floor 70% |
+| Miner power-limit | **off** — nvidia-smi / host panel owns the card |
+| Keygen CPU pin | **on** — auto thread count, pinned to CUDA-host cores |
 
 ---
 
@@ -114,6 +121,7 @@ First run prompts for a `0x` wallet (or set `address =` in `miner.ini`).
 src/          C++ host
 vendor/       CUDA Argon2id kernels
 vast.sh       Vast.ai entrypoint
-build.sh      cmake + nvcc
-miner.ini.example
+build.sh      cmake + nvcc (arch from this GPU)
+scripts/detect-hardware.sh
+miner.ini.example          # 0 = auto from this box
 ```

@@ -43,7 +43,8 @@ struct Settings {
     // Max seconds for one flush window. 0 = stay until bag empty or both oracles leave.
     int match_drain_max_s = 0;
     // Parallel /verify workers during flush. 0 = auto from this box's flush CPU count
-    // (64 on 1 core, 512 on 2, 1024 on 3–4, 2048 on 5+). Never exceeds that cap.
+    // (256 on 1 core, 1024 on 2–4, 2048 on 5+). Never exceeds that cap.
+    // At 1024 in-flight / ~300ms, a 30s match window is ~20k–100k POSTs.
     int match_drain_parallel = 0;
     // Cap submits per flush wave (0 = no cap / whole matching bag).
     int match_drain_batch = 0;

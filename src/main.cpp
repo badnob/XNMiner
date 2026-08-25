@@ -1,6 +1,7 @@
 #include "app/supervisor.hpp"
 #include "common.hpp"
 #include "config/settings.hpp"
+#include "util/hardware.hpp"
 
 #include <cuda_runtime.h>
 
@@ -137,14 +138,6 @@ int main(int argc, char** argv) {
                       << "  L2=" << (prop.l2CacheSize / (1024 * 1024)) << "MiB"
                       << "  flags=" << (fl == cudaSuccess ? "spin+maphost" : cudaGetErrorString(fl))
                       << "\n";
-#ifdef XN_BLACKWELL_BUILD
-            std::cout << "Build XN_BLACKWELL_BUILD=1  arch-specific cubin requested (120a/120)\n";
-#else
-            std::cout << "WARNING: XN_BLACKWELL_BUILD is not defined in this binary\n";
-#endif
-            if (prop.major < 12) {
-                std::cerr << "WARNING: this GPU is not Blackwell (need sm_120). H/s will be wrong.\n";
-            }
             if (prop.persistingL2CacheMaxSize > 0) {
                 cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize, 0);
             }
@@ -154,18 +147,32 @@ int main(int argc, char** argv) {
         }
     }
 
+    const auto hw = xn::probe_hardware(settings.device_id);
+    std::cout << "Hardware  " << hw.summary() << "\n";
+    if (hw.cuda_ok && hw.sm_arch > 0 && hw.sm_arch < 75) {
+        std::cerr << "ERROR: " << hw.gpu_name << " sm_" << hw.sm_arch
+                  << " is older than Turing (sm_75). This miner will not run.\n";
+        return 1;
+    }
+
     if (diagnose) {
-        int devices = 0;
-        cudaError_t st = cudaGetDeviceCount(&devices);
         std::cout << "{\n"
                   << "  \"app\": \"" << xn::kAppName << "\",\n"
                   << "  \"version\": \"" << xn::kMinerVersion << "\",\n"
                   << "  \"address\": \"" << settings.address << "\",\n"
                   << "  \"worker\": \"" << settings.worker << "\",\n"
                   << "  \"base_url\": \"" << settings.base_url << "\",\n"
-                  << "  \"device_id\": " << settings.device_id << ",\n"
-                  << "  \"max_lanes\": " << settings.cuda_max_lanes << ",\n"
-                  << "  \"cuda_devices\": " << (st == cudaSuccess ? devices : -1) << "\n"
+                  << "  \"device_id\": " << hw.device_id << ",\n"
+                  << "  \"gpu\": \"" << hw.gpu_name << "\",\n"
+                  << "  \"family\": \"" << hw.family << "\",\n"
+                  << "  \"sm_arch\": " << hw.sm_arch << ",\n"
+                  << "  \"vram_mib\": " << hw.vram_mib << ",\n"
+                  << "  \"cpu_cores\": " << hw.cpu_cores << ",\n"
+                  << "  \"auto_lanes\": " << hw.suggested_lanes << ",\n"
+                  << "  \"auto_batch_m100\": " << hw.suggested_batch_m100 << ",\n"
+                  << "  \"auto_keygen\": " << hw.suggested_keygen << ",\n"
+                  << "  \"max_lanes_ini\": " << settings.cuda_max_lanes << ",\n"
+                  << "  \"cuda_devices\": " << hw.cuda_devices << "\n"
                   << "}\n";
         return 0;
     }

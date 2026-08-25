@@ -1,6 +1,11 @@
 #include "util/cpu_affinity.hpp"
 
-#ifndef _WIN32
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
 #include <pthread.h>
 #include <sched.h>
 #include <unistd.h>
@@ -30,7 +35,11 @@ std::vector<int> cpus_cuda;
 
 int detect_online() {
 #ifdef _WIN32
-    return 1;
+    SYSTEM_INFO si{};
+    GetSystemInfo(&si);
+    int n = static_cast<int>(si.dwNumberOfProcessors);
+    if (n < 1) n = 1;
+    return n;
 #else
     long n = sysconf(_SC_NPROCESSORS_ONLN);
     if (n < 1) n = 1;
@@ -164,11 +173,13 @@ int suggested_keygen_threads() {
 }
 
 int flush_http_cap() {
+    // IO-bound /verify. Mock on 2026-08-25: 1024 in-flight dummy POSTs to
+    // xenblocks.io/verify, 0 timeouts, ~230–330ms (20s client timeout).
+    // 1-core stays at 256 so a 4-core / 8 GB box does not spawn 1024 stacks.
     const int fc = flush_cpu_count();
-    int cap = fc * 256;
-    if (cap < 32) cap = 32;
-    if (fc <= 1) cap = 64;
-    else if (fc == 2) cap = 512;
+    int cap = 256;
+    if (fc <= 1) cap = 256;
+    else if (fc == 2) cap = 1024;
     else if (fc <= 4) cap = 1024;
     else cap = 2048;
     if (cap > 2048) cap = 2048;
@@ -178,14 +189,14 @@ int flush_http_cap() {
 std::string layout_summary() {
     std::lock_guard<std::mutex> lock(mu);
     std::ostringstream oss;
-    int cap = 64;
-    if (flush_n <= 1) cap = 64;
-    else if (flush_n == 2) cap = 512;
+    int cap = 256;
+    if (flush_n <= 1) cap = 256;
+    else if (flush_n == 2) cap = 1024;
     else if (flush_n <= 4) cap = 1024;
     else cap = 2048;
     oss << physical_cores << " CPUs — desktop " << desktop_n << " free, bag " << bag_n
         << ", flush " << flush_n << ", dashboard " << dash_n << ", CUDA host " << cuda_n
-        << ", /verify cap " << cap;
+        << ", /verify cap " << cap << " (~" << (cap * 100) << "/30s @ 300ms)";
     return oss.str();
 }
 

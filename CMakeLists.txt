@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
+cmake_policy(SET CMP0057 NEW)
 project(xnminer_cuda LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -6,11 +7,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-# Match the winning Windows Desktop binary: sm_120 SASS (not sm_120a),
-# compiled with CUDA 13.x nvcc (16 MH/s / 94% util). CUDA 12.8 nvcc on
-# Vast produced the same sm_120 tag at ~7 MH/s / 70% util. 120a is worse.
+# Prefer the GPU in this box. build.sh passes CMAKE_CUDA_ARCHITECTURES from
+# nvidia-smi (75 / 86 / 89 / 90 / 120). If cmake is run by hand with no -D:
+# native on CMake 3.24+, otherwise a Turing-through-Blackwell fat cubin.
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    set(CMAKE_CUDA_ARCHITECTURES "120")
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.24")
+        set(CMAKE_CUDA_ARCHITECTURES native)
+    else()
+        set(CMAKE_CUDA_ARCHITECTURES "75;86;89;90;120")
+    endif()
 endif()
 
 set(VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor")
@@ -24,6 +29,7 @@ add_executable(xnminer
     ${SRC_DIR}/util/paths.cpp
     ${SRC_DIR}/util/sha256.cpp
     ${SRC_DIR}/util/cpu_affinity.cpp
+    ${SRC_DIR}/util/hardware.cpp
     ${SRC_DIR}/mining/argon2_encode.cpp
     ${SRC_DIR}/mining/block_types.cpp
     ${SRC_DIR}/mining/cuda_engine.cpp
@@ -101,9 +107,11 @@ target_compile_options(xnminer PRIVATE
     $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-O3>
 )
 
-target_compile_definitions(xnminer PRIVATE
-    XN_BLACKWELL_BUILD=1
-)
+# Kernel hint only when this cubin includes Blackwell SASS.
+string(REPLACE "," ";" _xn_cuda_arches "${CMAKE_CUDA_ARCHITECTURES}")
+if("120" IN_LIST _xn_cuda_arches OR "120a" IN_LIST _xn_cuda_arches)
+    target_compile_definitions(xnminer PRIVATE XN_BLACKWELL_BUILD=1)
+endif()
 
 set_target_properties(xnminer PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
