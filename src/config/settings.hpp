@@ -10,6 +10,12 @@ struct Settings {
     std::string worker;
     std::string base_url = "http://xenblocks.io";
     int connection_timeout_s = 20;
+    // Optional SOCKS/HTTP proxy for POST /verify only (not Woodyminer, GitHub, or oracles).
+    // Example: socks5h://127.0.0.1:1080  — unique egress per Vast box beats a shared host IP.
+    // VERIFY_PROXY env overrides this. Empty = direct from the box IP.
+    std::string verify_proxy;
+    // true = Vast auto WARP SOCKS for /verify (same-IP fleets). miner.ini toggle. Default on.
+    bool verify_warp_socks = true;
     int network_poll_interval_s = 1;
     // /difficulty is flaky; fail fast and retry so short m=100 windows are not missed.
     int network_poll_timeout_s = 3;

@@ -119,6 +119,8 @@ private:
     std::atomic<bool> shutting_down_{false};
     std::atomic<bool> update_requested_{false};
     double last_update_check_ = 0;
+    double last_config_check_ = 0;
+    std::filesystem::file_time_type config_mtime_{};
     std::mutex persist_mu_;  // serialize bag/persist from console handler + main
 
     // Network / submit state (shared: mining thread + CPU submit worker)
@@ -183,6 +185,7 @@ private:
     void log_flush_skip(const std::string& why);
     int live_submit_timeout_s() const;
     void maybe_check_update(double now);
+    void maybe_reload_config(double now);
     void push_flush_status(int inflight, int pool, int bag_q);
 };
 

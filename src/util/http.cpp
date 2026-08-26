@@ -15,6 +15,7 @@
 #endif
 
 #include <algorithm>
+#include <cctype>
 #include <sstream>
 #include <vector>
 
@@ -355,9 +356,31 @@ struct CurlKeepAlive {
 
 thread_local CurlKeepAlive tls_curl;
 
+void apply_curl_proxy(CURL* curl, const std::string& proxy) {
+    if (!curl || proxy.empty()) return;
+    curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str());
+    // socks5h = resolve xenblocks.io on the exit, not on the shared Vast IP.
+    std::string scheme = proxy;
+    auto cut = scheme.find("://");
+    if (cut != std::string::npos) scheme = scheme.substr(0, cut);
+    for (char& c : scheme) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (scheme == "socks5h") {
+        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5_HOSTNAME);
+    } else if (scheme == "socks5") {
+        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5);
+    } else if (scheme == "socks4a") {
+        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS4A);
+    } else if (scheme == "socks4") {
+        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS4);
+    } else if (scheme == "http" || scheme == "https") {
+        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_HTTP);
+    }
+}
+
 HttpResponse curl_request(const std::string& method, const std::string& url, const std::string& body,
                           int timeout_ms, const std::string& content_type,
-                          const std::string& user_agent, const std::string& extra_header = {}) {
+                          const std::string& user_agent, const std::string& extra_header = {},
+                          const std::string& proxy = {}) {
     ensure_curl();
     HttpResponse out;
     CURL* curl = tls_curl.get();
@@ -390,6 +413,7 @@ HttpResponse curl_request(const std::string& method, const std::string& url, con
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPINTVL, 15L);
     curl_easy_setopt(curl, CURLOPT_FORBID_REUSE, 0L);
     curl_easy_setopt(curl, CURLOPT_FRESH_CONNECT, 0L);
+    apply_curl_proxy(curl, proxy);
     if (headers) curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     if (!body.empty() || method == "POST" || method == "PUT") {
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
@@ -422,15 +446,17 @@ HttpResponse http_get(const std::string& url, int timeout_ms, const std::string&
 }
 
 HttpResponse http_post_json(const std::string& url, const std::string& json_body, int timeout_ms,
-                            const std::string& user_agent, const std::string& extra_header) {
+                            const std::string& user_agent, const std::string& extra_header,
+                            const std::string& proxy) {
 #ifdef _WIN32
     const std::string ua = user_agent.empty() ? "python-requests/2.31.0" : user_agent;
+    (void)proxy;  // SOCKS /verify proxy is the Linux Vast path (libcurl).
     return winhttp_oneshot("POST", url, json_body, timeout_ms, "application/json; charset=utf-8",
                            ua);
 #else
     const std::string ua = user_agent.empty() ? default_user_agent() : user_agent;
     return curl_request("POST", url, json_body, timeout_ms, "application/json; charset=utf-8", ua,
-                        extra_header);
+                        extra_header, proxy);
 #endif
 }
 

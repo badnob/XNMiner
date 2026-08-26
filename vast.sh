@@ -28,6 +28,10 @@ WORKER="${WORKER:-}"
 DEVICE="${DEVICE:-0}"
 BAG_FORWARD_URL="${BAG_FORWARD_URL:-}"
 BAG_FORWARD_TOKEN="${BAG_FORWARD_TOKEN:-}"
+VERIFY_PROXY="${VERIFY_PROXY:-}"
+SUBMIT_ENABLED="${SUBMIT_ENABLED:-true}"
+# Empty = follow miner.ini verify_warp_socks (default true). 0/1 overrides the file.
+WARP_SOCKS="${WARP_SOCKS:-}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "${HERE}/CMakeLists.txt" && -f "${HERE}/miner.ini.example" ]]; then
@@ -111,7 +115,45 @@ fi
 
 cd "${ROOT}"
 chmod +x build.sh start-miner.sh install-deps.sh vast.sh \
-  scripts/detect-hardware.sh scripts/ensure-cuda13.sh scripts/hard-restart.sh 2>/dev/null || true
+  scripts/detect-hardware.sh scripts/ensure-cuda13.sh scripts/hard-restart.sh \
+  scripts/verify-warp-socks.sh scripts/verify-proxy-exit.sh 2>/dev/null || true
+
+setup_verify_warp() {
+  mkdir -p "${ROOT}/data/warp-socks"
+  if [[ ! -f miner.ini && -f miner.ini.example ]]; then
+    cp -f miner.ini.example miner.ini
+  fi
+  local flag=""
+  if [[ -f miner.ini ]]; then
+    flag="$(awk -F= '/^[[:space:]]*verify_warp_socks[[:space:]]*=/{v=$2; gsub(/[ \t\r]/,"",v); print v; exit}' miner.ini || true)"
+  fi
+  [[ -z "${flag}" ]] && flag=true
+  case "${WARP_SOCKS,,}" in
+    0|false|no|off) flag=false ;;
+    1|true|yes|on) flag=true ;;
+  esac
+  if [[ -n "${VERIFY_PROXY}" && "${VERIFY_PROXY}" != "socks5h://127.0.0.1:40000" ]]; then
+    echo "Using custom VERIFY_PROXY (WARP SOCKS skipped)."
+    return 0
+  fi
+  if [[ "${flag,,}" == "false" || "${flag,,}" == "0" || "${flag,,}" == "off" || "${flag,,}" == "no" ]]; then
+    rm -f "${ROOT}/data/warp-socks/enabled"
+    VERIFY_PROXY=""
+    echo "verify_warp_socks is off — POST /verify uses this box IP."
+    return 0
+  fi
+  touch "${ROOT}/data/warp-socks/enabled"
+  if bash "${ROOT}/scripts/verify-warp-socks.sh"; then
+    VERIFY_PROXY="socks5h://127.0.0.1:40000"
+  else
+    echo "WARN: WARP SOCKS failed — POST /verify will use this box IP. SSH is fine." >&2
+    VERIFY_PROXY=""
+  fi
+}
+setup_verify_warp
+# Empty = leave miner.ini match_drain_* alone (default 512 in the example).
+MATCH_DRAIN_PARALLEL="${MATCH_DRAIN_PARALLEL:-}"
+MATCH_DRAIN_BATCH="${MATCH_DRAIN_BATCH:-}"
 
 if command -v nvidia-smi >/dev/null 2>&1; then
   echo "GPU kernel driver is the Vast host module — not replaced on git push."
@@ -148,7 +190,10 @@ apply_ini_env() {
   fi
   tmp="$(mktemp)"
   awk -v addr="${ADDRESS}" -v worker="${WORKER}" -v dev="${DEVICE}" \
-      -v bagurl="${BAG_FORWARD_URL}" -v bagtok="${BAG_FORWARD_TOKEN}" '
+      -v bagurl="${BAG_FORWARD_URL}" -v bagtok="${BAG_FORWARD_TOKEN}" \
+      -v vproxy="${VERIFY_PROXY}" -v suben="${SUBMIT_ENABLED}" \
+      -v vwarp="${WARP_SOCKS}" \
+      -v mpar="${MATCH_DRAIN_PARALLEL}" -v mbat="${MATCH_DRAIN_BATCH}" '
     /^address[[:space:]]*=/ { print "address = " addr; next }
     /^worker[[:space:]]*=/ {
       if (worker != "") { print "worker = " worker; next }
@@ -163,10 +208,26 @@ apply_ini_env() {
     /^bag_forward_token[[:space:]]*=/ {
       if (bagtok != "") { print "bag_forward_token = " bagtok; next }
     }
+    /^verify_proxy[[:space:]]*=/ {
+      if (vproxy != "") { print "verify_proxy = " vproxy; vp=1; next }
+    }
+    /^verify_warp_socks[[:space:]]*=/ {
+      vw=1
+      if (vwarp == "0" || vwarp == "false" || vwarp == "off" || vwarp == "no") {
+        print "verify_warp_socks = false"; next
+      }
+      if (vwarp == "1" || vwarp == "true" || vwarp == "on" || vwarp == "yes") {
+        print "verify_warp_socks = true"; next
+      }
+    }
     /^xuni_mining_enabled[[:space:]]*=/ { print "xuni_mining_enabled = false"; next }
-    /^match_drain_parallel[[:space:]]*=/ { print "match_drain_parallel = 512"; mdp=1; next }
-    /^match_drain_batch[[:space:]]*=/ { print "match_drain_batch = 512"; mdb=1; next }
-    /^submit_enabled[[:space:]]*=/ { print "submit_enabled = true"; se=1; next }
+    /^match_drain_parallel[[:space:]]*=/ {
+      if (mpar != "") { print "match_drain_parallel = " mpar; next }
+    }
+    /^match_drain_batch[[:space:]]*=/ {
+      if (mbat != "") { print "match_drain_batch = " mbat; next }
+    }
+    /^submit_enabled[[:space:]]*=/ { print "submit_enabled = " suben; se=1; next }
     /^match_drain_enabled[[:space:]]*=/ { print "match_drain_enabled = true"; md=1; next }
     /^send_pow_enabled[[:space:]]*=/ { print "send_pow_enabled = false"; next }
     /^connection_timeout_s[[:space:]]*=/ { print "connection_timeout_s = 20"; next }
@@ -198,10 +259,10 @@ apply_ini_env() {
     /^dashboard_cpu_cores[[:space:]]*=/ { print "dashboard_cpu_cores = 0"; next }
     { print }
     END {
-      if (!se) print "submit_enabled = true"
+      if (!se) print "submit_enabled = " suben
       if (!md) print "match_drain_enabled = true"
-      if (!mdp) print "match_drain_parallel = 512"
-      if (!mdb) print "match_drain_batch = 512"
+      if (vproxy != "" && !vp) print "verify_proxy = " vproxy
+      if (!vw) print "verify_warp_socks = true"
     }
   ' miner.ini > "${tmp}"
   mv "${tmp}" miner.ini
@@ -226,7 +287,7 @@ apply_git_update() {
   fi
   echo "GitHub update ${local_sha:0:8} -> ${remote_sha:0:8} (built ${built_sha:0:8}) — rebuilding"
   git reset --hard "origin/${branch}"
-  chmod +x build.sh start-miner.sh install-deps.sh vast.sh scripts/ensure-cuda13.sh scripts/detect-hardware.sh 2>/dev/null || true
+  chmod +x build.sh start-miner.sh install-deps.sh vast.sh scripts/ensure-cuda13.sh scripts/detect-hardware.sh scripts/verify-warp-socks.sh 2>/dev/null || true
   ./build.sh
   write_build_sha
   apply_ini_env
@@ -247,7 +308,7 @@ write_build_sha
 apply_ini_env
 
 echo
-echo "Starting miner  address=${ADDRESS}  worker=${WORKER:-auto}  device=${DEVICE}  bag=${BAG_FORWARD_URL:-off}"
+echo "Starting miner  address=${ADDRESS}  worker=${WORKER:-auto}  device=${DEVICE}  bag=${BAG_FORWARD_URL:-off}  verify_proxy=${VERIFY_PROXY:-off}"
 echo "Logs: ${ROOT}/data/session.log"
 echo "TUI:  tmux attach -t xnminer     (detach: Ctrl+B then D — miner keeps running)"
 echo "Auto-update: GitHub ${REPO_SLUG} (SIGTERM bags the queue, then pull + rebuild + restart)"
@@ -278,6 +339,7 @@ launch_tui() {
 
 while [[ "${stopping}" -eq 0 ]]; do
   set +e
+  setup_verify_warp
   launch_tui
   sleep 2
   miner_pid="$(pgrep -x xnminer | head -n1 || true)"

@@ -1,50 +1,71 @@
-# xnminer-low-dif-hybrid-blackwell
+# xnminer — hybrid low-difficulty XenBlocks miner
 
-Pure C++/CUDA XenBlocks miner — same **champ / work-patch** engine as the fast Windows 5090 build. Hybrid force-mine `m=100`, queue until paper/`m=` matches, then flush. Version **`4.20.69-cuda-blkwll`**. **No Python.**
+**`4.20.69-cuda-blkwll`** · pure C++/CUDA · no Python
 
-**New hardware is auto-detected.** `build.sh` reads `nvidia-smi` (GPU name, SM arch, VRAM) and `nproc` (CPU cores). The cubin is compiled for **that** GPU. At start the miner sizes lanes, batch, keygen, and `/verify` width from this box:
+This is not a stock port of the public XenBlocks clients. It is an original mining architecture I designed around how this network actually behaves: Argon2 `m=` is the cost of a hash, `/verify` is the only path that pays, and rented GPUs behind one provider NAT are not fifteen independent IPs.
 
-- **Build arch:** Turing 75 / Ampere 86 / Ada 89 / Hopper 90 / Blackwell 120. Empty detect → multi-arch cubin (`75;86;89;90;120`). Override with `CMAKE_CUDA_ARCHITECTURES=86 ./build.sh`.
-- **CUDA toolkit:** Blackwell prefers CUDA 13 (faster SASS). 30/40-series keep the image’s nvcc (12.x is fine — CUDA 13 is not installed on those boxes).
-- **CPU:** last 2 physical cores = CUDA host while mining. At m=100 CUDA **parks**; first 6 cores run **512** `/verify` workers, one wave per second. Dashboard has no reserved cores (Uptime still on the TUI).
-- **GPU lanes:** from total VRAM (~3.5 GiB/lane at m=100). 8 GB→2, 16 GB→4, 24 GB→6, 32 GB→8. Batch fills 80% VRAM.
-- **Keygen:** 12 threads, pinned **off** the CUDA-host spin cores so 8 lanes do not starve the GPU.
-- **Power:** left to nvidia-smi / the host panel. Memory junction hold 81 °C, cap 85 °C.
-
-`bash scripts/detect-hardware.sh` prints the plan without mining. `./build/bin/xnminer --diagnose` dumps it as JSON.
-
-Needs an **NVIDIA Turing-or-newer** GPU (RTX 20 / GTX 16 and up). No AMD, no CPU mining, one GPU (`device_id`).
-
-GPU always keeps hashing during flush. Mixed lastblock windows keep mining while the matching bag goes out. 401/timeout does not freeze the bag.
+The result is a miner that **force-mines at `m=100`**, **bags work until the network matches**, then **parks the GPU and lets the CPU drain `/verify`**, with **worker lanes, batch sizes, and safety caps** on both GPU and CPU so a 5090 does not cook itself or starve the submit path. When many boxes share an egress IP, **only hash submits** leave through a local WARP SOCKS. That is not a VPN. SSH stays on the machine.
 
 ---
 
-## One-liners
+## What I found, and what I built from it
 
-Run these from the box. Update needs `GH_TOKEN` in the environment (or in the live `vast.sh` process).
+### 1. Worker lanes — GPU and CPU — with batch sizes and caps
 
-**Kill**
-```bash
-pkill -9 -f '/build/bin/xnminer'; pkill -9 -f 'bash vast.sh'
-```
+A Blackwell 5090 is wasted if you treat it as one queue. I split the card into **VRAM-sized CUDA lanes** (~3.5 GiB per lane at `m=100`): 8 GB→2, 16 GB→4, 24 GB→6, 32 GB→8. Batch fills **80% of VRAM**, with **20% desktop headroom**, an **emergency 95% VRAM stop**, and a **thermal batch floor of 70%** so the pack does not collapse to a trickle when memory junction climbs.
 
-**Update** (kill, pull `origin/main`, rebuild, start)
-```bash
-bash /workspace/xnminer-low-dif-hybrid-blackwell/scripts/hard-restart.sh
-```
+The CPU is not an afterthought. I pinned roles:
 
-**Start**
-```bash
-cd /workspace/xnminer-low-dif-hybrid-blackwell && bash vast.sh
-```
+| Role | Cores (typical 8-core Vast box) | Job |
+|------|----------------------------------|-----|
+| CUDA host | last **2** physical | keep the GPU fed |
+| Flush | first **6** | `/verify` when `m=` matches |
+| Keygen | **12** threads, **off** the CUDA-host spin cores | never starve 8 lanes |
+
+Lanes, batch, and keygen are measured on **this** box at start (`0` in `miner.ini` means auto). Caps exist so a mis-detect cannot over-commit VRAM or pin every core onto HTTP.
+
+### 2. Park the GPU, flush on the CPU
+
+XenBlocks does not pay hashrate. It pays **accepted `POST /verify`**. During an `m=100` window the bottleneck is sockets, not SMs. I park CUDA so the flush cores own the machine, then brute `/verify` at **512 in-flight** (one wave per second). Mixed lastblock windows can keep mining while the matching bag goes out. HTTP 401/429 is a **hold**, not a reject — the hash stays in the bag. A timeout does not freeze a 90k queue.
+
+That split — **hash on GPU, credit on CPU** — is the difference between a pretty MH/s number and blocks that actually land.
+
+### 3. Low-difficulty force mining (hybrid `m=100`)
+
+Live network `m=` is often 1100. Hashing at 1100 on purpose is slow. I mine **always at `m=100`**, queue every hit, and watch two oracles (`/difficulty` and lastblock paper on `:4445` / `:4447`) at a 1s tick. When either oracle says the bag `m=` is live, the miner flushes. When they leave, CUDA resumes `m=100`. Classic “follow the network” is still there (`force_mine_memory_cost = 0`). Hybrid is the default because it is the correct model for this protocol.
+
+### 4. Same-IP `/verify` — a proxy, not a VPN
+
+Vast (and any host NAT) gives many containers **one outbound IPv4**. Fifteen 512-wide flushers from that address look like one client slamming `/verify`. A full-tunnel VPN would move SSH too and lock people out of rented boxes.
+
+I isolated **only** `POST /verify` through a **userspace WARP SOCKS** on `127.0.0.1:40000`. GPU, SSH, Woodyminer, GitHub auto-update, and the oracles stay on the box IP. No Cloudflare account. Enabled by default in `miner.ini`. Turn it off in that file and restart **the miner process**, not the machine.
 
 ---
 
-## Vast.ai (private repo)
+## Defaults (what is on)
 
-`raw.githubusercontent.com` returns **404** on private repos. Clone with git instead.
+| Piece | Default |
+|-------|---------|
+| Hybrid force-mine `m=100` + paper/thermometer flush | on |
+| GPU lanes / batch / keygen auto from this card | on |
+| Park CUDA + 6-core CPU `/verify` (512 × 512) | on |
+| WARP SOCKS for `/verify` only (`verify_warp_socks`) | **on** |
+| Memory-junction hold 81 °C / cap 85 °C, batch floor 70% | on |
+| VRAM pack 80% / 20% headroom / 95% emergency | on |
+| Woodyminer | on |
+| GitHub auto-update (bag, rebuild, restart) | on |
+| Miner-set power limit | **off** (nvidia-smi / host panel owns the card) |
+| XUNI hunting | **off** (queued XUNI still flush `:55–:04`) |
 
-Replace `ghp_…` with a real PAT (`repo` scope) and `0x…` with your wallet — not the words `YOUR_PAT` / `YOUR_WALLET`.
+NVIDIA Turing or newer (RTX 20 / GTX 16+). One GPU (`device_id`). No AMD. Blackwell builds with CUDA 13 when present; 30/40-series keep the image nvcc.
+
+`bash scripts/detect-hardware.sh` prints the plan. `./build/bin/xnminer --diagnose` dumps JSON.
+
+---
+
+## Vast.ai
+
+Private repo: do **not** curl `raw.githubusercontent.com` (404). Clone with git. CUDA **devel** image (`nvcc` required).
 
 ```bash
 export GH_TOKEN=ghp_xxxxxxxx
@@ -55,24 +76,95 @@ cd xnminer-low-dif-hybrid-blackwell
 bash vast.sh
 ```
 
-That detects the GPU in the box (SM + VRAM + CPU), builds the matching cubin, writes `miner.ini` with auto lanes/batch/CPU (`0` = measure at start), and mines with the live TUI in tmux. Optional: `export WORKER=vast-1 DEVICE=0` before `bash vast.sh`.
+Optional: `export WORKER=27605` (many people use the Vast SSH port as the name).
 
-Watch it over SSH (same Campbell dashboard theme as the Windows miner — no tmux status bar):
+### See the dashboard (after start, after a restart, after an update)
+
+SSH into the box, then type this and press Enter:
+
 ```bash
 tmux attach -t xnminer
 ```
-Detach without stopping: **Ctrl+B** then **D**. Ctrl+C in the TUI stops the miner and bags the queue.
 
-To back up the local bag onto your Windows miner (so a wiped Vast box does not lose queued hits):
+That is the live miner screen. Use it any time the miner restarts itself.
+
+To leave the screen **without stopping the miner:** press **Ctrl+B**, then tap **D**.
+
+If it says `no session`, wait 10 seconds and run the same command again. Do not reboot.
+
+Windows bag vault (Vast disks vanish): `BAG_FORWARD_URL` / `BAG_FORWARD_TOKEN` — see `HOWTO.md`. The box still flushes locally; Windows is the spare bag.
+
+### One-liners (from the box)
 
 ```bash
-export BAG_FORWARD_URL=http://YOUR.HOME.IP:18787/bag
-export BAG_FORWARD_TOKEN=the_token_from_windows_miner.ini
+# stop
+pkill -9 -f '/build/bin/xnminer'; pkill -9 -f 'bash vast.sh'
+
+# start
+cd /workspace/xnminer-low-dif-hybrid-blackwell && bash vast.sh
+
+# pull main, rebuild, start (does not reboot the Vast instance)
+bash /workspace/xnminer-low-dif-hybrid-blackwell/scripts/hard-restart.sh
 ```
 
-Windows miner must have `bag_ingest_enabled = true` and that port forwarded (or Tailscale). Vast still flushes locally when `m=` matches; Windows is the spare bag.
+---
 
-Use a **CUDA devel** template (has `nvcc`), not a runtime-only image.
+## Same-IP `/verify` proxy — `miner.ini`, default on
+
+```ini
+[server]
+verify_warp_socks = true
+```
+
+`true` (default): local WARP SOCKS, only hash submits. Not a VPN.  
+`false`: `/verify` uses this machine’s IP.
+
+No extra exports. No Cloudflare login. Flush width stays **512** until you change `match_drain_parallel` / `match_drain_batch` in the same file.
+
+### Disable or enable — save the file, it restarts like auto-update
+
+Do **not** reboot the Vast machine. Do **not** kill `vast.sh`.
+
+1. Edit:
+
+```bash
+nano /workspace/xnminer-low-dif-hybrid-blackwell/miner.ini
+```
+
+```ini
+verify_warp_socks = false
+```
+
+(or `true` to turn it back on)
+
+2. Save: **Ctrl+O**, Enter, **Ctrl+X**.
+
+3. Wait about 10 seconds. The miner notices the save, bags the queue, and comes back — same as auto-update. Hits stay on disk.
+
+4. Open the dashboard again:
+
+```bash
+tmux attach -t xnminer
+```
+
+If a match-flush is in progress, it finishes that window first, then restarts. If attach fails, wait a few more seconds and run it once more.
+
+Confirm in `data/session.log`:
+
+```text
+POST /verify via proxy socks5h://127.0.0.1:40000
+```
+
+If that line is missing, submits are going out the box IP.
+
+Flush later, if 512 through WARP 401s:
+
+```ini
+match_drain_parallel = 64
+match_drain_batch = 64
+```
+
+Save the file. The miner restarts itself the same way.
 
 ---
 
@@ -86,42 +178,40 @@ chmod +x install-deps.sh build.sh start-miner.sh
 ./start-miner.sh
 ```
 
-First run prompts for a `0x` wallet (or set `address =` in `miner.ini`).
+First run asks for a `0x` wallet (or set `address =` in `miner.ini`).
 
 ```text
-./build/bin/xnminer
 ./build/bin/xnminer
 ./build/bin/xnminer --diagnose
 ```
 
-`build.sh` picks `CMAKE_CUDA_ARCHITECTURES` from `nvidia-smi` (75 / 86 / 89 / 90 / 120) and sizes lanes/batch from VRAM. Override with `CMAKE_CUDA_ARCHITECTURES=120 ./build.sh`. Preview: `bash scripts/detect-hardware.sh`.
+`build.sh` picks `CMAKE_CUDA_ARCHITECTURES` from `nvidia-smi` (75 / 86 / 89 / 90 / 120). Override: `CMAKE_CUDA_ARCHITECTURES=120 ./build.sh`.
 
 ---
 
-## What is on / off
+## Hardware auto-detect
 
-| Feature | State |
-|---------|--------|
-| Hybrid force-mine `m=100` + paper-oracle brute flush | on (`/verify` width auto from CPU) |
-| Auto GPU arch / VRAM lanes / CPU split | **on** — `0` in `miner.ini` means measure this box |
-| Auto-update from GitHub (bag queue, rebuild, restart) | on |
-| XUNI hunting | **off** — GPU stays on XNM/XBLK; queued XUNI still flush `:55–:04` |
-| Woodyminer upload | on |
-| CUDA lanes | **auto** from VRAM (not stuck at 8) |
-| VRAM pack | **on** — 80% target, 20% desktop headroom |
-| Memory-junction thermal hunt | **on** — hold 81 °C / cap 85 °C, batch floor 70% |
-| Miner power-limit | **off** — nvidia-smi / host panel owns the card |
-| Keygen CPU pin | **on** — auto thread count, pinned to CUDA-host cores |
+| GPU family | Arch | Typical VRAM → lanes |
+|------------|------|----------------------|
+| Turing (20 / 16) | 75 | 8 GB → 2 |
+| Ampere (30) | 86 | 8→2, 12→3, 24→6 |
+| Ada (40) | 89 | 16→4, 24→6 |
+| Hopper | 90 | 80 GB → 8 (cap) |
+| Blackwell (50) | 120 | 16→4, 32→8 |
+
+Empty detect → multi-arch cubin `75;86;89;90;120`. Pascal / 10-series will not build.
 
 ---
 
 ## Layout
 
 ```text
-src/          C++ host
-vendor/       CUDA Argon2id kernels
-vast.sh       Vast.ai entrypoint
-build.sh      cmake + nvcc (arch from this GPU)
+src/                 C++ host (supervisor, CUDA engine, /verify, TUI)
+vendor/              CUDA Argon2id kernels (champ / work-patch)
+vast.sh              Vast entry — detect, build, TUI, auto-update, WARP SOCKS
+build.sh             cmake + nvcc for this GPU
 scripts/detect-hardware.sh
-miner.ini.example          # 0 = auto from this box
+scripts/verify-warp-socks.sh    userspace SOCKS, no default route
+scripts/hard-restart.sh         pull + rebuild, no VM reboot
+miner.ini.example    0 = measure this box; verify_warp_socks = true
 ```

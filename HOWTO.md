@@ -113,6 +113,66 @@ When paper or `/difficulty` matches bag `m=`, CPU brute-flushes `/verify` (256 /
 
 Needs `GH_TOKEN` (already required to clone the private repo).
 
+## Local WARP SOCKS (free, not a VPN, SSH stays up)
+
+This is the “only `/verify` leaves through another IP” path. It does **not** change the box default route. SSH, CUDA, Woodyminer, GitHub stay on Vast.
+
+**On by default** in `miner.ini`:
+
+```ini
+verify_warp_socks = true
+```
+
+`bash vast.sh` starts a userspace Cloudflare WARP SOCKS at `127.0.0.1:40000` and points only `POST /verify` at it. No extra export, no Cloudflare account. Flush stays **512**.
+
+To disable without rebooting the Vast machine: set `verify_warp_socks = false` in `miner.ini` and save. The miner sees the file change, bags the queue, and `vast.sh` restarts it — the same path as auto-update. Wait about 10 seconds, then open the dashboard:
+
+```bash
+tmux attach -t xnminer
+```
+
+Leave without stopping: **Ctrl+B**, then **D**.
+
+Check `data/session.log` for `POST /verify via proxy socks5h://127.0.0.1:40000`. If WARP cannot start, the miner still runs and `/verify` uses the box IP.
+
+```bash
+curl -4 -fsS https://ifconfig.me                  # Vast IP — SSH uses this
+curl -4 -fsS -x socks5h://127.0.0.1:40000 https://ifconfig.me   # Cloudflare IP — pool sees this
+```
+
+All of your miners may still share a handful of Cloudflare addresses. If 512 through WARP 401s, then drop the flush width. Do not use random public proxy lists: `/verify` is HTTP and includes your wallet.
+
+## Per-box `/verify` proxy (shared Vast IP)
+
+Vast instances on one host share an outbound IP. Fifteen boxes × 512 `/verify` from that IP is how the pool 401s you. A single free VPN for the fleet is the same problem (one shared egress). Do **not** wrap the whole container in WARP/WireGuard — SSH and the GPU stay on the Vast IP; only POST `/verify` should leave via a unique SOCKS.
+
+**1. One cheap VPS per unique IP** (Ubuntu/Debian). Copy `scripts/verify-proxy-exit.sh` from this tree (private repo — do not curl `raw.githubusercontent.com`). As root on the VPS:
+
+```bash
+bash verify-proxy-exit.sh
+```
+
+It prints a `VERIFY_PROXY=socks5h://…` line. Save it. Repeat on each VPS so every public IP is different.
+
+**2. On that Vast box**, after this build is running (git pull / auto-update):
+
+```bash
+export VERIFY_PROXY=socks5h://USER:PASS@VPS.IP:1080
+curl -4 -fsS --max-time 15 -x "$VERIFY_PROXY" https://ifconfig.me
+# must print the VPS IP, not the Vast IP
+cd /workspace/xnminer-low-dif-hybrid-blackwell && bash vast.sh
+```
+
+`socks5h` resolves `xenblocks.io` on the exit. Woodyminer, GitHub auto-update, `/difficulty`, and lastblock stay on the box IP. With `VERIFY_PROXY` set, `vast.sh` uses flush width **64** (override with `MATCH_DRAIN_PARALLEL` / `MATCH_DRAIN_BATCH`). Tony.x1 stays direct — do not set a proxy there.
+
+**3. Confirm** in `data/session.log`:
+
+```text
+POST /verify via proxy socks5h://***@x.x.x.x:1080 (oracles/Woodyminer stay on box IP)
+```
+
+Fewer VPS than GPUs: put 2–3 miners on one exit, keep width 64. Never point all 15 at one SOCKS.
+
 ## Home vault (Windows backup bag)
 
 Vast disks vanish when the instance dies. The miner can copy every queued hit to your Windows miner and still flush locally when `m=` matches.

@@ -84,11 +84,12 @@ std::string submit_response_hint(int status, const std::string& body) {
 }
 
 Submitter::Submitter(std::string verify_url, std::string account, std::string worker,
-                     SessionLogger* logger)
+                     SessionLogger* logger, std::string proxy)
     : verify_url_(std::move(verify_url)),
       account_(std::move(account)),
       worker_(std::move(worker)),
-      logger_(logger) {}
+      logger_(logger),
+      proxy_(std::move(proxy)) {}
 
 SubmitResult Submitter::submit(const BlockHit& hit, int timeout_s, bool quiet) {
     // Exact field types that landed HTTP 200s on 2026-08-12 (PowerShell flusher).
@@ -104,7 +105,7 @@ SubmitResult Submitter::submit(const BlockHit& hit, int timeout_s, bool quiet) {
     // python-requests UA + charset JSON is the path that accepted blocks.
     // Miner UA xnminer-cuda/4.0 was 401 empty-body on every m=100 window today.
     auto resp = http_post_json(verify_url_, payload.dump(), timeout_s * 1000,
-                               "python-requests/2.31.0");
+                               "python-requests/2.31.0", {}, proxy_);
     result.status = resp.status;
     result.body = resp.body.empty() ? resp.error : resp.body;
     result.ok = submit_accepted(result.status, result.body);

@@ -53,5 +53,5 @@ git reset --hard origin/main
 git remote set-url origin "https://github.com/badnob/xnminer-low-dif-hybrid-blackwell.git"
 
 echo "now=$(git rev-parse --short HEAD)"
-chmod +x vast.sh build.sh scripts/hard-restart.sh scripts/detect-hardware.sh scripts/ensure-cuda13.sh 2>/dev/null || true
+chmod +x vast.sh build.sh scripts/hard-restart.sh scripts/detect-hardware.sh scripts/ensure-cuda13.sh scripts/verify-warp-socks.sh 2>/dev/null || true
 exec bash vast.sh

@@ -18,7 +18,7 @@ std::string submit_response_hint(int status, const std::string& body);
 class Submitter {
 public:
     Submitter(std::string verify_url, std::string account, std::string worker,
-              SessionLogger* logger = nullptr);
+              SessionLogger* logger = nullptr, std::string proxy = {});
 
     SubmitResult submit(const BlockHit& hit, int timeout_s = 20, bool quiet = false);
 
@@ -27,6 +27,7 @@ private:
     std::string account_;
     std::string worker_;
     SessionLogger* logger_ = nullptr;
+    std::string proxy_;
 };
 
 }  // namespace xn

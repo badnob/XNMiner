@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -253,6 +254,19 @@ Settings load_settings(const std::filesystem::path& ini_path) {
     s.worker = trim(get(ini, "account", "worker"));
     s.base_url = trim(get(ini, "server", "base_url", s.base_url));
     s.connection_timeout_s = get_i(ini, "server", "connection_timeout_s", s.connection_timeout_s);
+    s.verify_proxy = trim(get(ini, "server", "verify_proxy"));
+    s.verify_warp_socks = get_b(ini, "server", "verify_warp_socks", true);
+    if (const char* env_proxy = std::getenv("VERIFY_PROXY")) {
+        auto from_env = trim(env_proxy);
+        if (!from_env.empty()) s.verify_proxy = from_env;
+    }
+    if (!s.verify_warp_socks) {
+        const auto& p = s.verify_proxy;
+        if (p.find("127.0.0.1:40000") != std::string::npos ||
+            p.find("localhost:40000") != std::string::npos) {
+            s.verify_proxy.clear();
+        }
+    }
     s.network_poll_interval_s = get_i(ini, "server", "network_poll_interval_s", s.network_poll_interval_s);
     s.network_poll_timeout_s = get_i(ini, "server", "network_poll_timeout_s", s.network_poll_timeout_s);
     s.network_down_poll_interval_s =

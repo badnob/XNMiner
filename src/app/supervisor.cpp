@@ -69,7 +69,8 @@ Supervisor::Supervisor(Settings settings, bool use_dashboard)
     store_ = std::make_unique<BlockStore>(settings_.db_path, settings_.jsonl_path,
                                           settings_.rejected_jsonl_path);
     submitter_ = std::make_unique<Submitter>(settings_.verify_url(), settings_.address,
-                                             settings_.worker, logger_.get());
+                                             settings_.worker, logger_.get(),
+                                             settings_.verify_proxy);
     engine_ = std::make_unique<CudaEngine>(settings_);
     poller_ = std::make_unique<NetworkPoller>(
         settings_.difficulty_url(), settings_.network_poll_interval_s,
@@ -500,6 +501,29 @@ void Supervisor::maybe_check_update(double now) {
     log("info", "GitHub update " + st.local_sha.substr(0, 8) + " -> " +
                     st.remote_sha.substr(0, 8) + " — bagging queue and restarting into new build");
     update_requested_ = true;
+    persist_queue_for_restart();
+}
+
+void Supervisor::maybe_reload_config(double now) {
+    // Same bag-and-exit path as GitHub auto-update. vast.sh brings the process back.
+    if (shutting_down_ || update_requested_) return;
+    if (match_drain_active()) return;
+    if (now - last_config_check_ < 4.0) return;
+    last_config_check_ = now;
+
+    std::error_code ec;
+    const auto path = settings_.root / "miner.ini";
+    if (!std::filesystem::exists(path, ec) || ec) return;
+    const auto mt = std::filesystem::last_write_time(path, ec);
+    if (ec) return;
+    if (config_mtime_ == std::filesystem::file_time_type{}) {
+        config_mtime_ = mt;
+        return;
+    }
+    if (mt == config_mtime_) return;
+    config_mtime_ = mt;
+    log("info", "miner.ini changed — bagging queue and restarting (same path as auto-update)");
+    if (dashboard_) dashboard_->set_status("miner.ini saved — restarting...");
     persist_queue_for_restart();
 }
 
@@ -1446,6 +1470,15 @@ void Supervisor::run(std::optional<int> max_seconds) {
 
     cpu::pin_this_thread(cpu::Role::CudaHost);
     log("info", "CPU layout: " + cpu::layout_summary());
+    if (!settings_.verify_proxy.empty()) {
+        std::string shown = settings_.verify_proxy;
+        auto at = shown.find('@');
+        auto scheme = shown.find("://");
+        if (at != std::string::npos && scheme != std::string::npos && at > scheme) {
+            shown = shown.substr(0, scheme + 3) + "***" + shown.substr(at);
+        }
+        log("info", "POST /verify via proxy " + shown + " (oracles/Woodyminer stay on box IP)");
+    }
     {
         const auto hw = probe_hardware(settings_.device_id);
         log("info", "Hardware auto: " + hw.summary());
@@ -1600,6 +1633,13 @@ void Supervisor::run(std::optional<int> max_seconds) {
 
     log("info", "=== Mining started (pure CUDA) ===");
     if (dashboard_) dashboard_->set_status("Mining");
+    {
+        std::error_code ec;
+        const auto ini = settings_.root / "miner.ini";
+        if (std::filesystem::exists(ini, ec)) {
+            config_mtime_ = std::filesystem::last_write_time(ini, ec);
+        }
+    }
 
     // Mining timer starts after engine is up (not during VRAM alloc / probes).
     const double mining_started_at = now_s();
@@ -1621,6 +1661,7 @@ void Supervisor::run(std::optional<int> max_seconds) {
         // CPU flush when paper/thermometer shows bag m=. Park CUDA only on live match.
         update_match_drain(t);
         maybe_check_update(t);
+        maybe_reload_config(t);
         if (match_drain_active()) submit_cv_.notify_all();
 
         auto snap = gpu_->snapshot();

@@ -8,7 +8,15 @@ worker =
 # Pool website. Do not add /difficulty or /verify — the miner adds those.
 base_url = http://xenblocks.io
 # How long one /verify POST may wait (seconds).
-connection_timeout_s = 20
+connection_timeout_s = 3
+# SOCKS/HTTP proxy for POST /verify only. Empty = box IP.
+# vast.sh fills this when verify_warp_socks is true.
+verify_proxy =
+# Same-IP fleets (Vast, one host NAT): POST /verify through a local WARP SOCKS.
+# Not a VPN — SSH, GPU, Woodyminer stay on this machine. Default on.
+# false = submit from this box IP. Save this file — the miner bags the queue and
+# restarts itself (same path as GitHub auto-update). Do not reboot the machine.
+verify_warp_socks = true
 # One clock for /difficulty and lastblock. Code forces these to match.
 # 1s tick = notice m=100 (and leaving it) as fast as the pool will tell us.
 network_poll_interval_s = 1
