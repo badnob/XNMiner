@@ -439,9 +439,10 @@ HttpResponse curl_request(const std::string& method, const std::string& url, con
 
 HttpResponse http_get(const std::string& url, int timeout_ms, const std::string& extra_header) {
 #ifdef _WIN32
-    return winhttp_request("GET", url, {}, timeout_ms, {}, default_user_agent());
+    return winhttp_request("GET", url, {}, timeout_ms, {}, "python-requests/2.31.0");
 #else
-    return curl_request("GET", url, {}, timeout_ms, {}, default_user_agent(), extra_header);
+    // Same UA as POST /verify so GET /difficulty is the flush clock, not STALE.
+    return curl_request("GET", url, {}, timeout_ms, {}, "python-requests/2.31.0", extra_header);
 #endif
 }
 

@@ -467,8 +467,8 @@ void Supervisor::maybe_reload_config(double now) {
 bool Supervisor::refresh_network(bool blocking, bool replan_engine) {
     // API findings: /difficulty is flaky and often needs 8–12s; timeouts must not
     // zero the hashrate path or force-queue every hit. Keep last-good difficulty
-    // (never use leaderboard stub "100") and only mark network hard-down after
-    // a streak of failures.
+    // (leaderboard is holdings only — never an m= fallback) and only mark network
+    // hard-down after a streak of failures.
     //
     // replan_engine=true only from the mining thread (CUDA set_difficulty is not
     // safe to call from the CPU submit worker).
@@ -523,7 +523,6 @@ bool Supervisor::refresh_network(bool blocking, bool replan_engine) {
                 }
                 // Power profile can follow network load; hashing m= does not.
                 if (power_) power_->set_difficulty(forced_mine_m());
-                submit_cv_.notify_one();
             } else {
                 log("info", "Difficulty " + std::to_string(old_diff) + " -> " + std::to_string(diff) +
                                 " — queuing hits briefly");
@@ -547,6 +546,9 @@ bool Supervisor::refresh_network(bool blocking, bool replan_engine) {
             dashboard_->set_network(true, diff, false);
             if (force_mine_mode()) dashboard_->set_mining_m(forced_mine_m(), true);
         }
+        // /difficulty is the flush clock. Arm 512-wide /verify as soon as it matches.
+        update_match_drain(now_s());
+        submit_cv_.notify_all();
         return true;
     }
 
@@ -613,10 +615,8 @@ void Supervisor::ui_event(const std::string& action, const std::string& block,
         if (!detail.empty()) label += " " + detail;
         timelapse_->record_event(label);
     }
-    if (dashboard_) {
-        dashboard_->event(action, block, detail);
-        ui_refresh();
-    }
+    // Do not render here — wallet HTTP + a full redraw on every HIT stalls /verify.
+    if (dashboard_) dashboard_->event(action, block, detail);
 }
 
 void Supervisor::ui_refresh() {
@@ -862,7 +862,8 @@ void Supervisor::process_live_submit(BlockHit hit, std::string kind) {
 int Supervisor::try_flush_pending(const std::string& context, bool on_shutdown) {
     // CPU submit worker only (or shutdown after mining stopped).
     if (bag_only()) return 0;
-    const bool draining = match_drain_active_.load();
+    if (!on_shutdown) update_match_drain(now_s());
+    bool draining = match_drain_active_.load() || oracle_says_m(bag_target_m());
     // Brute match-flush ignores 401/timeout backoff so a 90k bag is not frozen.
     if (!on_shutdown && !draining && !flush_submit_allowed()) {
         log_flush_skip("submit not allowed (backoff or net down)");
@@ -872,26 +873,33 @@ int Supervisor::try_flush_pending(const std::string& context, bool on_shutdown) 
         std::lock_guard<std::mutex> lock(state_mu_);
         if (now_s() < defer_submit_until_) return 0;
     }
-    // Never replan CUDA from the submit worker; on shutdown mining is already stopped.
-    const bool refreshed = refresh_network(on_shutdown, /*replan_engine=*/false);
-    if (!refreshed) {
-        if (on_shutdown) {
-            store_->defer_all_to_next_start();
+    // During an open /difficulty match window, last-good m= is enough — a flaky
+    // GET must not skip the 512-wide /verify wave.
+    if (!draining) {
+        const bool refreshed = refresh_network(on_shutdown, /*replan_engine=*/false);
+        if (!refreshed) {
+            if (on_shutdown) {
+                store_->defer_all_to_next_start();
+                return 0;
+            }
+            if (!flush_submit_allowed() || !network_matches_hit_m(bag_target_m())) {
+                log_flush_skip("difficulty poll failed and last-good does not match bag");
+                return 0;
+            }
+        }
+        if (!on_shutdown) update_match_drain(now_s());
+        draining = match_drain_active_.load() || oracle_says_m(bag_target_m());
+        if (!on_shutdown && !draining && !flush_submit_allowed()) {
+            log_flush_skip("submit not allowed after difficulty refresh");
             return 0;
         }
-        // Hybrid: a flaky /difficulty poll used to abort the whole match window
-        // (flushed~0 with thousands still queued). Last-good m= is enough to send.
-        if (!flush_submit_allowed() || !network_matches_hit_m(bag_target_m())) {
-            log_flush_skip("difficulty poll failed and last-good does not match bag");
-            return 0;
-        }
-    }
-    if (!on_shutdown && !draining && !flush_submit_allowed()) {
-        log_flush_skip("submit not allowed after difficulty refresh");
-        return 0;
     }
 
     int net_m = submit_target_m();
+    if (draining) {
+        const int bag = bag_target_m();
+        if (bag > 0) net_m = bag;
+    }
     if (net_m <= 0) {
         log_flush_skip("no last-good /difficulty m=");
         return 0;
@@ -967,7 +975,6 @@ int Supervisor::try_flush_pending(const std::string& context, bool on_shutdown) 
     int accept_xnm = 0, accept_xuni = 0, accept_xblk = 0;
     std::string last_hold_hint;
     std::atomic<double> last_progress_log{now_s()};
-    const int bag_m = bag_target_m();
 
     auto handle_one = [&](size_t i, const SubmitResult& result) {
         auto& item = work[i];
@@ -1038,11 +1045,10 @@ int Supervisor::try_flush_pending(const std::string& context, bool on_shutdown) 
         pool.reserve(static_cast<size_t>(nworkers));
         for (int w = 0; w < nworkers; ++w) {
             try {
-                pool.emplace_back([this, &work, &next, &handle_one, timeout_s, draining, bag_m]() {
+                pool.emplace_back([this, &work, &next, &handle_one, timeout_s]() {
                     cpu::pin_this_thread(cpu::Role::Flush);
                     for (;;) {
                         if (shutting_down_.load()) break;
-                        if (draining && oracle_left_m(bag_m)) break;
                         const size_t i = next.fetch_add(1);
                         if (i >= work.size()) break;
                         handle_one(i, submitter_->submit(work[i].hit, timeout_s, /*quiet=*/true));
@@ -1135,14 +1141,17 @@ void Supervisor::service_pending_queue(double now) {
         was_in_xuni_window_ = false;
     }
 
-    // Match-flush: one 512-wide /verify wave per second (6 flush cores).
-    const bool draining = match_drain_active_.load();
+    // Match-flush: 512 overlapping /verify as soon as live /difficulty matches bag m=.
+    const bool draining = match_drain_active_.load() || oracle_says_m(bag_target_m());
     double flush_every = pending_total > 500 ? 1.0 : (pending_total > 50 ? 2.0 : 5.0);
-    if (draining) flush_every = 1.0;
+    if (draining) flush_every = 0.0;
     if (taper && pending_xuni > 0) flush_every = std::min(flush_every, 0.25);
     if (now - last_queue_flush_ >= flush_every) {
-        if (draining || oracle_says_m(bag_target_m())) {
-            try_flush_pending(draining ? "match-flush" : "queue service");
+        if (draining) {
+            try_flush_pending("match-flush");
+            last_queue_flush_ = now;
+        } else {
+            try_flush_pending("queue service");
             last_queue_flush_ = now;
         }
     } else if (submit_win && pending_xuni) {
@@ -1246,6 +1255,7 @@ void Supervisor::submit_worker_loop() {
         }
 
         consume_drop_list();
+        if (!shutting_down_.load() && !bag_only()) update_match_drain(now_s());
 
         // While shutting down, never open new HTTP — bag to disk instead.
         if (shutting_down_.load()) {

@@ -32,13 +32,26 @@ That split — **hash on GPU, credit on CPU** — is the difference between a pr
 
 ### 3. Low-difficulty force mining (hybrid `m=100`)
 
-Live network `m=` is often 1100. Hashing at 1100 on purpose is slow. I mine **always at `m=100`**, queue every hit, and poll **only** `http://xenblocks.io/difficulty` once a second. That is what `/verify` checks. When live Net m= hits 100, the miner flushes. When it leaves, CUDA resumes `m=100`. Lastblock “paper” m= is not polled — it is sealed history and was opening flushes the pool would 401. Classic “follow the network” is still there (`force_mine_memory_cost = 0`). Hybrid is the default because it is the correct model for this protocol.
+Live network `m=` is often 1100. Hashing at 1100 on purpose is slow. I mine **always at `m=100`**, queue every hit, and poll **only** `http://xenblocks.io/difficulty` once a second. That is what `/verify` checks. When live Net m= hits 100, the miner flushes at **512** in-flight `/verify`. When it leaves, CUDA resumes `m=100`.
+
+**GET `/v1/leaderboard` is holdings value only** (XNM / XUNI / XBLK on the dashboard). It is never m=, never a flush clock, and never a fallback when `/difficulty` is slow. Lastblock “paper” m= is not polled either — it is sealed history and was opening flushes the pool would 401. Classic “follow the network” is still there (`force_mine_memory_cost = 0`). Hybrid is the default because it is the correct model for this protocol.
 
 ### 4. Same-IP `/verify` — a proxy, not a VPN
 
 Vast (and any host NAT) gives many containers **one outbound IPv4**. Fifteen 512-wide flushers from that address look like one client slamming `/verify`. A full-tunnel VPN would move SSH too and lock people out of rented boxes.
 
 I isolated **only** `POST /verify` through a **userspace WARP SOCKS** on `127.0.0.1:40000`. GPU, SSH, Woodyminer, GitHub auto-update, and the oracles stay on the box IP. No Cloudflare account. Enabled by default in `miner.ini`. Turn it off in that file and restart **the miner process**, not the machine.
+
+---
+
+## Network roles
+
+| Endpoint | Role |
+|----------|------|
+| **GET `/difficulty`** | The only m= clock. Flush when this equals bag m=. |
+| **POST `/verify`** | The only credit path. Uses live `/difficulty`. |
+| **GET `/v1/leaderboard`** | Holdings value only (dashboard XNM / XUNI / XBLK). Never m=. |
+| **Woodyminer** | Optional stats upload. Not XenBlocks holdings, not m=. |
 
 ---
 

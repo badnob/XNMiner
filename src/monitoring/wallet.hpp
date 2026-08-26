@@ -37,6 +37,7 @@ public:
 private:
     bool fetch(TokenBalances& out, std::string& source);
     bool fetch_rpc(const char* url, TokenBalances& out);
+    /// XenBlocks /v1/leaderboard — holdings value only, never m=.
     bool fetch_leaderboard(TokenBalances& out);
     void load_last_known();
     void loop();

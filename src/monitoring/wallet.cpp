@@ -22,6 +22,7 @@ constexpr const char* XBLK_CONTRACT = "0x999999cf1046e68e36e1aa2e0e07105eddd0000
 constexpr double WEI_PER_TOKEN = 1e18;
 constexpr const char* RPC_PRIMARY = "https://xenblocks.io:5556";
 constexpr const char* RPC_FALLBACK = "http://xenblocks.io:5555";
+// Holdings value only (dashboard XNM/XUNI/XBLK). Never m= and never a flush clock.
 constexpr const char* LEADERBOARD_URL = "https://xenblocks.io/v1/leaderboard?limit=400";
 constexpr int kWalletRpcTimeoutMs = 5000;
 constexpr int kLeaderboardTimeoutMs = 8000;
@@ -228,16 +229,17 @@ bool WalletBalanceTracker::fetch_rpc(const char* url, TokenBalances& out) {
 }
 
 bool WalletBalanceTracker::fetch(TokenBalances& out, std::string& source) {
+    // Leaderboard is strictly holdings. RPC is a fallback if this wallet is not listed.
+    if (fetch_leaderboard(out)) {
+        source = "leaderboard";
+        return true;
+    }
     if (fetch_rpc(RPC_PRIMARY, out)) {
         source = "xenblocks.io";
         return true;
     }
     if (fetch_rpc(RPC_FALLBACK, out)) {
         source = "xenblocks.io";
-        return true;
-    }
-    if (fetch_leaderboard(out)) {
-        source = "leaderboard";
         return true;
     }
     return false;

@@ -40,7 +40,7 @@ struct Settings {
     bool match_drain_enabled = true;
     // Enter flush mode when at least this many pending blocks match current net m=.
     int match_drain_min_queue = 1;
-    // Max seconds for one flush window. 0 = stay until bag empty or both oracles leave.
+    // Max seconds for one flush window. 0 = stay until bag empty or /difficulty leaves bag m=.
     int match_drain_max_s = 0;
     // Parallel /verify workers during flush. 512 = live dummy peak HTTP/s.
     // 0 = auto from this box's flush CPU count.

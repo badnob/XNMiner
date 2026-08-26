@@ -102,30 +102,7 @@ NetworkStatus NetworkPoller::poll_once(int timeout_s) {
         st.error = resp.error.empty() ? ("HTTP " + std::to_string(resp.status)) : resp.error;
         if (st.error.empty()) st.error = "no response";
     }
-
-    // :80 /difficulty often times out. HTTPS leaderboard is reachable, but its
-    // "difficulty":"100" is a documented stub (xenblocks-api-findings-log §12.5).
-    // Never start an m=100 flush from that stub or from a stale lastblock bag.
-    if (!st.ok) {
-        auto board = http_get("https://xenblocks.io/v1/leaderboard?limit=1", t * 1000);
-        if (board.status >= 200 && board.status < 300) {
-            try {
-                auto j = nlohmann::json::parse(board.body, nullptr, false);
-                if (j.contains("difficulty")) {
-                    int d = 0;
-                    const auto& v = j["difficulty"];
-                    if (v.is_number_integer()) d = v.get<int>();
-                    else if (v.is_string()) d = std::stoi(v.get<std::string>());
-                    if (d > 0 && d != 100) {
-                        st.difficulty = d;
-                        st.ok = true;
-                        st.error.clear();
-                    }
-                }
-            } catch (...) {
-            }
-        }
-    }
+    // Live GET /difficulty is the only m= oracle. Do not invent m= from leaderboard.
     {
         std::lock_guard<std::mutex> lock(mu_);
         st.seq = ++seq_;
