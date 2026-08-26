@@ -220,9 +220,9 @@ void init_layout(int desktop_cores, int bag_cores, int flush_cores, int dashboar
     if (desktop_cores > nphys / 2) desktop_cores = nphys / 2;
 
     if (nphys >= 8) {
-        if (bag_cores <= 0) bag_cores = 2;
-        if (flush_cores <= 0) flush_cores = 2;
-        if (dashboard_cores <= 0) dashboard_cores = 2;
+        if (bag_cores <= 0) bag_cores = 0;
+        if (flush_cores <= 0) flush_cores = 6;
+        if (dashboard_cores <= 0) dashboard_cores = 0;
     } else {
         if (flush_cores <= 0) flush_cores = 1;
         if (bag_cores <= 0) bag_cores = (nphys >= 6) ? 1 : 0;

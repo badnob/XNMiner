@@ -42,12 +42,11 @@ struct Settings {
     int match_drain_min_queue = 1;
     // Max seconds for one flush window. 0 = stay until bag empty or both oracles leave.
     int match_drain_max_s = 0;
-    // Parallel /verify workers during flush. 0 = auto from this box's flush CPU count
-    // (256 on 1 core, 1024 on 2–4, 2048 on 5+). Never exceeds that cap.
-    // At 1024 in-flight / ~300ms, a 30s match window is ~20k–100k POSTs.
-    int match_drain_parallel = 0;
-    // Cap submits per flush wave (0 = no cap / whole matching bag).
-    int match_drain_batch = 0;
+    // Parallel /verify workers during flush. 512 = live dummy peak HTTP/s.
+    // 0 = auto from this box's flush CPU count.
+    int match_drain_parallel = 512;
+    // One wave per second during match-flush. 512 = that many hashes / second.
+    int match_drain_batch = 512;
 
     // Value priority: XNM > XBLK. XUNI hunting is off; existing queued XUNI still
     // flush in the :55–:04 submit window.
@@ -100,9 +99,9 @@ struct Settings {
     // 0 = dedicated miner (Vast): no cores reserved. Linux desktop can set 2–8.
     int desktop_cpu_cores = 0;
     // 0 = auto from online CPU count (bag / flush / dashboard / CUDA host).
-    int bag_sort_cpu_cores = 2;
-    int flush_cpu_cores = 2;
-    int dashboard_cpu_cores = 2;
+    int bag_sort_cpu_cores = 0;
+    int flush_cpu_cores = 6;
+    int dashboard_cpu_cores = 0;
     // Copy every queued hit to the Windows home vault. Empty = local bag only.
     std::string bag_forward_url;
     std::string bag_forward_token;

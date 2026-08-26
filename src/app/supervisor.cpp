@@ -45,9 +45,11 @@ double now_s() {
 int brute_drain_parallel(int configured, int bag_q) {
     const int cap = cpu::flush_http_cap();
     int par = configured;
-    if (par <= 0) par = cap;  // 0 = auto from this box's flush CPUs
-    if (bag_q >= 5000) par = std::max(par, std::min(1024, cap));
-    if (bag_q >= 25000) par = std::max(par, cap);
+    if (par <= 0) {
+        par = cap;
+        if (bag_q >= 5000) par = std::max(par, std::min(1024, cap));
+        if (bag_q >= 25000) par = std::max(par, cap);
+    }
     if (par > cap) par = cap;
     if (par < 1) par = 1;
     if (par > 4096) par = 4096;
@@ -275,8 +277,9 @@ bool Supervisor::match_drain_active() const {
 }
 
 bool Supervisor::should_park_cuda() const {
-    // GPU always keeps hashing. /verify is CPU-only and pinned off CUDA host cores.
-    return false;
+    // m=100 match window: stop the GPU so 6 flush cores can run 512 /verify
+    // workers without keygen/spin stealing them.
+    return match_drain_active_.load();
 }
 
 void Supervisor::refresh_paper() {
@@ -1176,10 +1179,10 @@ void Supervisor::service_pending_queue(double now) {
         was_in_xuni_window_ = false;
     }
 
-    // Match-flush: launch the next HTTP wave immediately after the last one returns.
+    // Match-flush: one 512-wide /verify wave per second (6 flush cores).
     const bool draining = match_drain_active_.load();
     double flush_every = pending_total > 500 ? 1.0 : (pending_total > 50 ? 2.0 : 5.0);
-    if (draining) flush_every = 0.0;
+    if (draining) flush_every = 1.0;
     if (taper && pending_xuni > 0) flush_every = std::min(flush_every, 0.25);
     if (now - last_queue_flush_ >= flush_every) {
         if (draining || oracle_says_m(bag_target_m())) {
@@ -1667,17 +1670,19 @@ void Supervisor::run(std::optional<int> max_seconds) {
         }
 
         try {
-            if (!engine_->is_running()) engine_->start();
-            // GPU never parks. Flush threads are pinned off these CUDA host cores.
             if (should_park_cuda()) {
-                if (!match_drain_gpu_parked_ && engine_->is_running()) {
+                if (engine_->is_running()) {
                     auto leftover = engine_->drain_pipeline();
                     if (leftover.hashes_done > 0) {
                         metrics_->record_hashes(leftover.hashes_done, engine_->last_hashrate());
                     }
                     handle_batch_hits(leftover);
+                    try {
+                        engine_->stop();
+                    } catch (...) {
+                    }
                     match_drain_gpu_parked_ = true;
-                    log("info", "CUDA parked for match-flush — live m= matches bag, CPU owns /verify");
+                    log("info", "CUDA parked for match-flush — 6 CPU cores x 512 /verify /s");
                 }
                 if (t - last_ui_ >= settings_.stats_interval_s) {
                     last_ui_ = t;
@@ -1690,6 +1695,7 @@ void Supervisor::run(std::optional<int> max_seconds) {
                 match_drain_gpu_parked_ = false;
                 log("info", "CUDA resumed mining — flush continues on CPU (live m= left bag)");
             }
+            if (!engine_->is_running()) engine_->start();
             // Queue-type scan only matters inside the XUNI mine window (soft-cap / throttle).
             // Outside that window, skip the O(queue) walk so the GPU path stays hot.
             if (settings_.xuni_mining_enabled && in_xuni_window()) {

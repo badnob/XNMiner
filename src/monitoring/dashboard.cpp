@@ -311,21 +311,7 @@ void MinerDashboard::render() {
     rule(oss);
 
     const bool flushing = status_.rfind("FLUSH", 0) == 0;
-    {
-        const char* sc = GREEN;
-        std::string st = status_.empty() ? "Running" : status_;
-        std::string short_st = st;
-        if (flushing) {
-            sc = YELLOW;
-            short_st = "FLUSH";
-        } else if (st.find("cool") != std::string::npos || st.find("Stop") != std::string::npos ||
-                   st.find("queue") != std::string::npos || st.find("Hybrid") != std::string::npos) {
-            sc = YELLOW;
-        }
-        if (st.find("error") != std::string::npos || st.find("fail") != std::string::npos) sc = RED;
-        row(oss, cell("Status", std::string(sc) + short_st + RST) +
-                     cell("Uptime", std::string(DIM) + fmt_uptime(uptime_s_) + RST));
-    }
+    row(oss, cell("Uptime", std::string(DIM) + fmt_uptime(uptime_s_) + RST));
     if (flushing) {
         // "FLUSH 15/16 in flight · cleared 1188 (new 1171) · bag 92021"
         std::string rest = status_.size() > 6 ? status_.substr(6) : status_;
@@ -363,7 +349,7 @@ void MinerDashboard::render() {
         std::string mine;
         if (force_hybrid_ && mining_m_ > 0) {
             mine = std::string(GREEN) + "m=" + std::to_string(mining_m_) + RST +
-                   std::string(DIM) + " fixed" + RST;
+                   std::string(DIM) + " Fix" + RST;
         } else {
             mine = difficulty_ ? ("m=" + std::to_string(*difficulty_)) : "-";
         }
@@ -391,8 +377,6 @@ void MinerDashboard::render() {
     rule(oss);
     row(oss, cell("Hashrate", std::string(BOLD) + WHITE + fmt_hps(stats_.hps_ema) + RST) +
                  cell("Hashes", fmt_hashes(stats_.total_hashes)));
-    row(oss, cell("Found", fmt_int(stats_.found_total())) +
-                 cell("Accepted", std::string(GREEN) + fmt_int(stats_.accepted_total()) + RST));
     row(oss, cell("Rejected", (stats_.rejected_total() ? std::string(RED) : std::string(DIM)) +
                                   fmt_int(stats_.rejected_total()) + RST) +
                  cell("Queued", (stats_.queued ? std::string(YELLOW) : std::string(DIM)) +
@@ -405,8 +389,9 @@ void MinerDashboard::render() {
         b << "XNM " << fmt_int(stats_.found_xnm) << "/" << fmt_int(an) << "   XBLK "
           << fmt_int(stats_.found_xblk) << "/" << fmt_int(ab) << "   XUNI "
           << fmt_int(stats_.found_xuni) << "/" << fmt_int(ax);
-        row(oss, cell("Blocks", b.str()));
-        row(oss, std::string(DIM) + "               found / accepted" + RST);
+        row(oss, cell("Blocks", b.str()) +
+                     cell("F/A", fmt_int(stats_.found_total()) + "/" +
+                                     std::string(GREEN) + fmt_int(stats_.accepted_total()) + RST));
     }
     {
         std::ostringstream b;

@@ -164,7 +164,8 @@ apply_ini_env() {
       if (bagtok != "") { print "bag_forward_token = " bagtok; next }
     }
     /^xuni_mining_enabled[[:space:]]*=/ { print "xuni_mining_enabled = false"; next }
-    /^match_drain_parallel[[:space:]]*=/ { print "match_drain_parallel = 0"; next }
+    /^match_drain_parallel[[:space:]]*=/ { print "match_drain_parallel = 512"; mdp=1; next }
+    /^match_drain_batch[[:space:]]*=/ { print "match_drain_batch = 512"; mdb=1; next }
     /^submit_enabled[[:space:]]*=/ { print "submit_enabled = true"; se=1; next }
     /^match_drain_enabled[[:space:]]*=/ { print "match_drain_enabled = true"; md=1; next }
     /^send_pow_enabled[[:space:]]*=/ { print "send_pow_enabled = false"; next }
@@ -192,13 +193,15 @@ apply_ini_env() {
     /^gpu_thermal_start_scale[[:space:]]*=/ { print "gpu_thermal_start_scale = 0.70"; next }
     /^gpu_cooldown_s[[:space:]]*=/ { print "gpu_cooldown_s = 20"; next }
     /^desktop_cpu_cores[[:space:]]*=/ { print "desktop_cpu_cores = 0"; next }
-    /^bag_sort_cpu_cores[[:space:]]*=/ { print "bag_sort_cpu_cores = 2"; next }
-    /^flush_cpu_cores[[:space:]]*=/ { print "flush_cpu_cores = 2"; next }
-    /^dashboard_cpu_cores[[:space:]]*=/ { print "dashboard_cpu_cores = 2"; next }
+    /^bag_sort_cpu_cores[[:space:]]*=/ { print "bag_sort_cpu_cores = 0"; next }
+    /^flush_cpu_cores[[:space:]]*=/ { print "flush_cpu_cores = 6"; next }
+    /^dashboard_cpu_cores[[:space:]]*=/ { print "dashboard_cpu_cores = 0"; next }
     { print }
     END {
       if (!se) print "submit_enabled = true"
       if (!md) print "match_drain_enabled = true"
+      if (!mdp) print "match_drain_parallel = 512"
+      if (!mdb) print "match_drain_batch = 512"
     }
   ' miner.ini > "${tmp}"
   mv "${tmp}" miner.ini

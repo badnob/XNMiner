@@ -78,7 +78,7 @@ Edit `miner.ini` (created from `miner.ini.example`):
 - `[cuda] max_lanes` / `batch_size` — **0** = auto from VRAM. `keygen_threads = 12` (desktop; pinned off CUDA-host cores)
 - `[queue] desktop_cpu_cores = 0`, bag/flush/dashboard **2** on an 8-core Vast box. CUDA host is the last 2 physical cores.
 - `[efficiency]` VRAM 80%, mem-junc 85/81, miner power-limit **off**
-- `[mining] match_drain_parallel = 0` auto-caps `/verify` workers from flush cores (256 / 1024 / 2048). Dummy `/verify` held 1024 in-flight with 0 timeouts; ~23k–100k POSTs per 30s at ~300ms.
+- `[mining] match_drain_parallel = 512` and `match_drain_batch = 512` — one 512-wide `/verify` wave per second. CUDA parks at m=100 so 6 CPU cores own flush.
 - `[queue] bag_forward_url` / `bag_forward_token` — copy queued hits to the Windows home vault
 
 ## Checks

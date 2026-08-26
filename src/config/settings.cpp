@@ -285,8 +285,8 @@ Settings load_settings(const std::filesystem::path& ini_path) {
     if (!s.submit_enabled) s.match_drain_enabled = false;
     s.match_drain_min_queue = get_i(ini, "mining", "match_drain_min_queue", 1);
     s.match_drain_max_s = get_i(ini, "mining", "match_drain_max_s", 0);
-    s.match_drain_parallel = get_i(ini, "mining", "match_drain_parallel", 0);
-    s.match_drain_batch = get_i(ini, "mining", "match_drain_batch", 0);
+    s.match_drain_parallel = get_i(ini, "mining", "match_drain_parallel", 512);
+    s.match_drain_batch = get_i(ini, "mining", "match_drain_batch", 512);
     if (s.match_drain_min_queue < 1) s.match_drain_min_queue = 1;
     // 0 = drain until the bag is empty or both oracles leave.
     if (s.match_drain_max_s < 0) s.match_drain_max_s = 0;
@@ -361,9 +361,9 @@ Settings load_settings(const std::filesystem::path& ini_path) {
         resolve_path(s.root, get(ini, "queue", "rejected_jsonl_path", "data/rejected.jsonl"));
     s.submit_cpu_fraction = get_d(ini, "queue", "submit_cpu_fraction", s.submit_cpu_fraction);
     s.desktop_cpu_cores = get_i(ini, "queue", "desktop_cpu_cores", 0);
-    s.bag_sort_cpu_cores = get_i(ini, "queue", "bag_sort_cpu_cores", 2);
-    s.flush_cpu_cores = get_i(ini, "queue", "flush_cpu_cores", 2);
-    s.dashboard_cpu_cores = get_i(ini, "queue", "dashboard_cpu_cores", 2);
+    s.bag_sort_cpu_cores = get_i(ini, "queue", "bag_sort_cpu_cores", 0);
+    s.flush_cpu_cores = get_i(ini, "queue", "flush_cpu_cores", 6);
+    s.dashboard_cpu_cores = get_i(ini, "queue", "dashboard_cpu_cores", 0);
     if (s.desktop_cpu_cores < 0) s.desktop_cpu_cores = 0;
     if (s.bag_sort_cpu_cores < 0) s.bag_sort_cpu_cores = 0;
     if (s.flush_cpu_cores < 0) s.flush_cpu_cores = 0;

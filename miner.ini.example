@@ -48,15 +48,10 @@ match_drain_enabled = true
 match_drain_min_queue = 1
 # Max seconds for one submit burst. 0 = keep flushing until the bag is empty or both oracles leave.
 match_drain_max_s = 0
-# In-flight /verify workers during match-flush (1–4096).
-# 0 = auto from this machine's flush CPU count (256 / 1024 / 2048).
-# Mock 2026-08-25: 1024 dummy POSTs to /verify, 0 timeouts, ~230–330ms.
-# A 30s matching window at that pace is ~23k (one wave) to ~100k (sustained).
-# Never exceeds the cap, so a 4-core box will not spawn 2048 HTTP threads.
-# Leave at 0 for new hardware — the miner measures nproc at start.
-match_drain_parallel = 0
-# Max blocks to send in one burst. 0 = send the whole matching queue.
-match_drain_batch = 0
+# In-flight /verify workers during match-flush. 512 matched the live dummy peak.
+match_drain_parallel = 512
+# Hashes per wave. With flush-every 1s this is ~512 /verify POSTs per second.
+match_drain_batch = 512
 # XUNI hunting is OFF. Existing queued XUNI still flush :55–:04. GPU stays on XNM/XBLK.
 xuni_mining_enabled = false
 # Stop looking for new XUNI when this many XUNI are already waiting in the queue.
@@ -131,13 +126,11 @@ jsonl_path = data/queue.jsonl
 rejected_jsonl_path = data/rejected.jsonl
 # Old setting. Submits already run on their own CPU thread — leave at 0.30.
 submit_cpu_fraction = 0.30
-# CPU split is physical cores. Dedicated Vast (8-core 7800X3D):
-# last 2 = CUDA host (spin-wait), first 6 = keygen (12 SMT threads).
-# bag/flush/dashboard share the keygen cores (IO wait, not spin).
+# m=100 parks CUDA. First 6 physical cores flush; last 2 stay CUDA host for resume.
 desktop_cpu_cores = 0
-bag_sort_cpu_cores = 2
-flush_cpu_cores = 2
-dashboard_cpu_cores = 2
+bag_sort_cpu_cores = 0
+flush_cpu_cores = 6
+dashboard_cpu_cores = 0
 # Copy every queued hit to the Windows home vault. Local bag stays and still flushes.
 # Example: http://YOUR.HOME.IP:18787/bag
 bag_forward_url =

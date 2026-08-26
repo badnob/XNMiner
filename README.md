@@ -6,7 +6,7 @@ Pure C++/CUDA XenBlocks miner — same **champ / work-patch** engine as the fast
 
 - **Build arch:** Turing 75 / Ampere 86 / Ada 89 / Hopper 90 / Blackwell 120. Empty detect → multi-arch cubin (`75;86;89;90;120`). Override with `CMAKE_CUDA_ARCHITECTURES=86 ./build.sh`.
 - **CUDA toolkit:** Blackwell prefers CUDA 13 (faster SASS). 30/40-series keep the image’s nvcc (12.x is fine — CUDA 13 is not installed on those boxes).
-- **CPU (desktop shape on an 8-core Vast box):** last 2 physical cores = CUDA host (spin-wait). First 6 = **12 keygen threads** (6×SMT), same as the Windows 9950X3D miner. bag/flush/dashboard share the keygen cores. Flush `/verify` width is 256 / 1024 / 2048.
+- **CPU:** last 2 physical cores = CUDA host while mining. At m=100 CUDA **parks**; first 6 cores run **512** `/verify` workers, one wave per second. Dashboard has no reserved cores (Uptime still on the TUI).
 - **GPU lanes:** from total VRAM (~3.5 GiB/lane at m=100). 8 GB→2, 16 GB→4, 24 GB→6, 32 GB→8. Batch fills 80% VRAM.
 - **Keygen:** 12 threads, pinned **off** the CUDA-host spin cores so 8 lanes do not starve the GPU.
 - **Power:** left to nvidia-smi / the host panel. Memory junction hold 81 °C, cap 85 °C.
