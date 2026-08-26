@@ -3,6 +3,7 @@
 #include "common.hpp"
 
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -22,6 +23,8 @@ public:
     void stop();
     NetworkStatus get_status() const;
     NetworkStatus poll_once(int timeout_s = -1);
+    /// Fired after every GET /difficulty snapshot (ok or fail) so CPU can arm flush immediately.
+    void set_on_update(std::function<void()> cb);
 
 private:
     void loop();
@@ -34,6 +37,7 @@ private:
     mutable std::mutex mu_;
     NetworkStatus status_;
     uint64_t seq_ = 0;
+    std::function<void()> on_update_;
     std::thread thread_;
 };
 

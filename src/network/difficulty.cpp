@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <functional>
 #include <optional>
 #include <thread>
 
@@ -83,6 +84,11 @@ NetworkStatus NetworkPoller::get_status() const {
     return status_;
 }
 
+void NetworkPoller::set_on_update(std::function<void()> cb) {
+    std::lock_guard<std::mutex> lock(mu_);
+    on_update_ = std::move(cb);
+}
+
 NetworkStatus NetworkPoller::poll_once(int timeout_s) {
     int t = timeout_s > 0 ? timeout_s : timeout_s_;
     if (t < 1) t = 1;
@@ -131,8 +137,18 @@ NetworkStatus NetworkPoller::poll_once(int timeout_s) {
 
 void NetworkPoller::loop() {
     while (running_) {
-        auto st = poll_once();
-        int sleep_s = st.ok ? poll_interval_s_ : down_poll_interval_s_;
+        poll_once();
+        std::function<void()> cb;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            cb = on_update_;
+        }
+        if (cb) cb();
+        int sleep_s = 0;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            sleep_s = status_.ok ? poll_interval_s_ : down_poll_interval_s_;
+        }
         for (int i = 0; i < sleep_s * 10 && running_; ++i) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }

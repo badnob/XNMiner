@@ -75,6 +75,7 @@ Supervisor::Supervisor(Settings settings, bool use_dashboard)
     poller_ = std::make_unique<NetworkPoller>(
         settings_.difficulty_url(), settings_.network_poll_interval_s,
         settings_.network_down_poll_interval_s, settings_.network_poll_timeout_s);
+    poller_->set_on_update([this] { submit_cv_.notify_all(); });
     local_stats_ = std::make_unique<LocalMiningStatsTracker>(settings_.log_path.parent_path() /
                                                              "mining_stats_history.json");
     timelapse_ =
@@ -223,8 +224,8 @@ bool Supervisor::flush_submit_allowed() const {
 bool Supervisor::oracle_says_m(int m) const {
     if (m <= 0) return false;
     std::lock_guard<std::mutex> lock(state_mu_);
-    // /verify is live /difficulty only. Lastblock paper is not polled and not a gate.
-    return network_ok_ && network_difficulty_ && *network_difficulty_ == m;
+    // Open the flush only on a live ONLINE /difficulty match, not last-good STALE/DOWN.
+    return network_ok_ && !difficulty_stale_ && network_difficulty_ && *network_difficulty_ == m;
 }
 
 bool Supervisor::oracle_left_m(int m) const {
@@ -1263,7 +1264,7 @@ void Supervisor::submit_worker_loop() {
         {
             std::unique_lock<std::mutex> lock(submit_mu_);
             // Wake often so large queues drain on the CPU path without waiting on the GPU.
-            submit_cv_.wait_for(lock, std::chrono::milliseconds(match_drain_active_.load() ? 20 : 250),
+            submit_cv_.wait_for(lock, std::chrono::milliseconds(match_drain_active_.load() ? 5 : 20),
                                 [this] {
                                     return !live_submit_q_.empty() || !submit_worker_running_ ||
                                            shutting_down_.load() || match_drain_active_.load();
@@ -1272,7 +1273,10 @@ void Supervisor::submit_worker_loop() {
         }
 
         consume_drop_list();
-        if (!shutting_down_.load() && !bag_only()) update_match_drain(now_s());
+        if (!shutting_down_.load() && !bag_only()) {
+            refresh_network(false, /*replan_engine=*/false);
+            update_match_drain(now_s());
+        }
 
         // While shutting down, never open new HTTP — bag to disk instead.
         if (shutting_down_.load()) {

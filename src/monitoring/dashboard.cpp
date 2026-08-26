@@ -402,15 +402,25 @@ void MinerDashboard::render() {
         row(oss, cell("Network", net) + cell("Mining", mine));
     }
     {
+        const bool live = network_ok_ && !network_stale_;
         std::string netm = difficulty_ ? ("m=" + std::to_string(*difficulty_)) : "-";
+        if (!difficulty_) {
+            netm = "-";
+        } else if (!network_ok_) {
+            netm = std::string(RED) + netm + RST + std::string(DIM) + " last-good" + RST;
+        } else if (network_stale_) {
+            netm = std::string(YELLOW) + netm + RST + std::string(DIM) + " last-good" + RST;
+        } else {
+            netm = std::string(WHITE) + netm + RST;
+        }
         std::string match;
-        if (force_hybrid_ && difficulty_ && *difficulty_ == mining_m_)
+        if (force_hybrid_ && live && difficulty_ && *difficulty_ == mining_m_)
             match = std::string(GREEN) + "MATCH" + RST;
         else if (difficulty_)
             match = std::string(YELLOW) + "waiting for match" + RST;
         else
             match = "-";
-        row(oss, cell("Net m=", std::string(WHITE) + netm + RST) + cell("Window", match));
+        row(oss, cell("Net m=", netm) + cell("Window", match));
         row(oss, cell("CUDA", std::to_string(cuda_lanes_) + " lane" +
                                  (cuda_lanes_ == 1 ? "" : "s") + " x " + fmt_int(cuda_batch_)) +
                      cell("", ""));
