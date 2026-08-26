@@ -75,9 +75,6 @@ Supervisor::Supervisor(Settings settings, bool use_dashboard)
     poller_ = std::make_unique<NetworkPoller>(
         settings_.difficulty_url(), settings_.network_poll_interval_s,
         settings_.network_down_poll_interval_s, settings_.network_poll_timeout_s);
-    paper_ = std::make_unique<LastblockPoller>(
-        settings_.lastblock_url, settings_.lastblock_url_fallback,
-        settings_.lastblock_poll_interval_s, settings_.lastblock_timeout_s);
     local_stats_ = std::make_unique<LocalMiningStatsTracker>(settings_.log_path.parent_path() /
                                                              "mining_stats_history.json");
     timelapse_ =
@@ -210,15 +207,13 @@ bool Supervisor::live_submit_allowed() const {
 
 bool Supervisor::flush_submit_allowed() const {
     if (bag_only()) return false;
-    // Queue flush may proceed on last-good m= even when /difficulty is flaky.
-    // Lastblock (paper) is enough to flush — do not require port 80.
-    // Match-drain ignores 401/timeout backoff so a 90k bag is not frozen.
+    // Queue flush follows live /difficulty only. Match-drain ignores 401/timeout backoff.
     std::lock_guard<std::mutex> lock(state_mu_);
     const double t = now_s();
     const bool draining = match_drain_active_.load();
     if (!draining && t < submit_backoff_until_) return false;
     if (!force_mine_mode() && t < defer_submit_until_) return false;
-    if (paper_ok_ || network_ok_) return true;
+    if (network_ok_) return true;
     if (force_mine_mode() && network_difficulty_ && *network_difficulty_ == forced_mine_m()) {
         return true;
     }
@@ -228,21 +223,15 @@ bool Supervisor::flush_submit_allowed() const {
 bool Supervisor::oracle_says_m(int m) const {
     if (m <= 0) return false;
     std::lock_guard<std::mutex> lock(state_mu_);
-    if (network_ok_ && network_difficulty_ && *network_difficulty_ == m) return true;
-    if (paper_ok_ && paper_newest_m_ && *paper_newest_m_ == m) return true;
-    return false;
+    // /verify is live /difficulty only. Lastblock paper is not polled and not a gate.
+    return network_ok_ && network_difficulty_ && *network_difficulty_ == m;
 }
 
 bool Supervisor::oracle_left_m(int m) const {
     if (m <= 0) return false;
     std::lock_guard<std::mutex> lock(state_mu_);
-    const bool net_says = network_ok_ && network_difficulty_ && *network_difficulty_ == m;
-    const bool paper_says = paper_ok_ && paper_newest_m_ && *paper_newest_m_ == m;
-    if (net_says || paper_says) return false;
-    const bool have_oracle =
-        (network_ok_ && network_difficulty_ && *network_difficulty_ > 0) ||
-        (paper_ok_ && paper_newest_m_ && *paper_newest_m_ > 0);
-    return have_oracle;
+    if (!(network_ok_ && network_difficulty_ && *network_difficulty_ > 0)) return false;
+    return *network_difficulty_ != m;
 }
 
 int Supervisor::submit_target_m() const {
@@ -250,7 +239,6 @@ int Supervisor::submit_target_m() const {
     if (oracle_says_m(bag)) return bag;
     std::lock_guard<std::mutex> lock(state_mu_);
     if (network_ok_ && network_difficulty_ && *network_difficulty_ > 0) return *network_difficulty_;
-    if (paper_ok_ && paper_newest_m_ && *paper_newest_m_ > 0) return *paper_newest_m_;
     return network_difficulty_.value_or(0);
 }
 
@@ -283,47 +271,6 @@ bool Supervisor::should_park_cuda() const {
     return match_drain_active_.load();
 }
 
-void Supervisor::refresh_paper() {
-    if (!paper_) return;
-    PaperStatus st = paper_->get_status();
-    if (st.seq == 0 || st.seq == last_paper_seq_) return;
-    last_paper_seq_ = st.seq;
-    int old_m = 0;
-    bool changed = false;
-    {
-        std::lock_guard<std::mutex> lock(state_mu_);
-        old_m = paper_newest_m_.value_or(0);
-        if (st.ok && st.newest_m) {
-            paper_ok_ = true;
-            paper_newest_m_ = st.newest_m;
-            paper_tip_id_ = st.tip_id;
-            last_paper_ok_at_ = now_s();
-            changed = old_m > 0 && old_m != *st.newest_m;
-        } else {
-            const double age = last_paper_ok_at_ > 0 ? (now_s() - last_paper_ok_at_) : 1e9;
-            paper_ok_ = paper_newest_m_.has_value() && age < 30.0;
-        }
-    }
-    if (changed) {
-        log("info", "Paper newest m=" + std::to_string(old_m) + " -> " +
-                        std::to_string(*st.newest_m) + " (tip " + std::to_string(st.tip_id) +
-                        (st.mixed ? ", mixed window)" : ")"));
-        submit_cv_.notify_all();
-    }
-    if (dashboard_) {
-        dashboard_->set_paper_m(st.ok ? st.newest_m : paper_newest_m_);
-        if (st.ok && st.newest_m) {
-            bool diff_ok = false;
-            {
-                std::lock_guard<std::mutex> lock(state_mu_);
-                diff_ok = network_ok_;
-            }
-            if (!diff_ok) dashboard_->set_network(true, st.newest_m, true);
-            if (force_mine_mode()) dashboard_->set_mining_m(forced_mine_m(), true);
-        }
-    }
-}
-
 void Supervisor::push_flush_status(int inflight, int pool, int bag_q) {
     if (!dashboard_) return;
     if (pool < 1) pool = 1;
@@ -338,7 +285,7 @@ void Supervisor::push_flush_status(int inflight, int pool, int bag_q) {
 }
 
 void Supervisor::update_match_drain(double now) {
-    // CPU flush while paper or thermometer shows bag m=. CUDA parks only on live match.
+    // CPU flush while live /difficulty matches bag m=. Paper does not open or hold the window.
     if (bag_only() || !settings_.match_drain_enabled) {
         if (match_drain_active_) {
             match_drain_active_ = false;
@@ -350,13 +297,9 @@ void Supervisor::update_match_drain(double now) {
     }
 
     int net_m = 0;
-    int paper_m = 0;
-    int paper_tip = 0;
     {
         std::lock_guard<std::mutex> lock(state_mu_);
         net_m = network_difficulty_.value_or(0);
-        paper_m = paper_newest_m_.value_or(0);
-        paper_tip = paper_tip_id_;
     }
     const int bag_m = bag_target_m();
     const bool last_good_matches = oracle_says_m(bag_m);
@@ -365,7 +308,6 @@ void Supervisor::update_match_drain(double now) {
     const int bag_q = store_ ? store_->pending_matching_m(bag_m, bag_m) : 0;
     const int match_q = last_good_matches ? bag_q : 0;
     const int min_q = settings_.match_drain_min_queue;
-    const int shown_m = (net_m == bag_m) ? net_m : (paper_m > 0 ? paper_m : net_m);
 
     if (match_drain_active_) {
         const bool timed_out =
@@ -373,7 +315,7 @@ void Supervisor::update_match_drain(double now) {
         const bool empty = last_good_matches && bag_q <= 0;
         if (empty || timed_out || confirmed_mismatch) {
             const char* why =
-                confirmed_mismatch ? "oracles left bag m=" : (empty ? "queue clear" : "time budget");
+                confirmed_mismatch ? "live diff left bag m=" : (empty ? "queue clear" : "time budget");
             log("info", std::string("Match-flush END (") + why + ") — flushed~" +
                             std::to_string(match_drain_flushed_.load()) +
                             " this window, remaining bag_q=" + std::to_string(bag_q) +
@@ -406,12 +348,9 @@ void Supervisor::update_match_drain(double now) {
         match_drain_cleared_ = 0;
         match_drain_logged_first_wave_ = false;
         flush_skip_before_id_ = 0;
-        const bool mixed = (net_m > 0 && paper_m > 0 && net_m != paper_m);
         const bool park = should_park_cuda();
         log("info", "Match-flush START — bag m=" + std::to_string(bag_m) +
-                        " (diff m=" + std::to_string(net_m) + " paper newest m=" +
-                        std::to_string(paper_m) + " tip=" + std::to_string(paper_tip) +
-                        (mixed ? ", mixed — stay until paper leaves" : "") +
+                        " (live /difficulty m=" + std::to_string(net_m) +
                         ") q=" + std::to_string(match_q) +
                         " brute parallel=" +
                         std::to_string(brute_drain_parallel(settings_.match_drain_parallel, match_q)) +
@@ -426,11 +365,9 @@ void Supervisor::update_match_drain(double now) {
 }
 
 int Supervisor::network_difficulty_for_public() const {
-    // Private: never report hybrid force-mine m= to leaderboards.
-    // Prefer /difficulty; if port 80 is down, sealed lastblock newest m= is the truth.
+    // Public stats = live /difficulty only. Never mine m= and never lastblock paper.
     std::lock_guard<std::mutex> lock(state_mu_);
     if (network_ok_ && network_difficulty_) return *network_difficulty_;
-    if (paper_ok_ && paper_newest_m_) return *paper_newest_m_;
     return 0;  // N/A
 }
 
@@ -689,10 +626,6 @@ void Supervisor::ui_refresh() {
         if (dashboard_) dashboard_->set_wallet_line(wallet_->summary_line());
     }
     if (dashboard_ && engine_) {
-        {
-            std::lock_guard<std::mutex> lock(state_mu_);
-            dashboard_->set_paper_m(paper_newest_m_);
-        }
         dashboard_->set_cuda_batch(engine_->batch_size(), engine_->active_lanes(),
                                    engine_->thermal_batch_scale());
         if (session_started_at_ > 0) {
@@ -941,7 +874,6 @@ int Supervisor::try_flush_pending(const std::string& context, bool on_shutdown) 
     }
     // Never replan CUDA from the submit worker; on shutdown mining is already stopped.
     const bool refreshed = refresh_network(on_shutdown, /*replan_engine=*/false);
-    refresh_paper();
     if (!refreshed) {
         if (on_shutdown) {
             store_->defer_all_to_next_start();
@@ -961,7 +893,7 @@ int Supervisor::try_flush_pending(const std::string& context, bool on_shutdown) 
 
     int net_m = submit_target_m();
     if (net_m <= 0) {
-        log_flush_skip("no last-good network/paper m=");
+        log_flush_skip("no last-good /difficulty m=");
         return 0;
     }
 
@@ -1443,7 +1375,6 @@ void Supervisor::finalize_session() {
     } catch (...) {
     }
     if (power_) power_->restore();
-    if (paper_) paper_->stop();
     if (poller_) poller_->stop();
     xbs_.stop();
     if (gpu_) gpu_->shutdown();
@@ -1499,7 +1430,6 @@ void Supervisor::run(std::optional<int> max_seconds) {
     }
 
     poller_->start();
-    if (paper_) paper_->start();
     if (wallet_) wallet_->start();
     // Initial network probe — short timeouts so a dead pool cannot delay mining start.
     // Mining uses last-good / fallback difficulty; submits queue until the pool returns.
@@ -1531,11 +1461,11 @@ void Supervisor::run(std::optional<int> max_seconds) {
                             " fixed; no /verify — desktop backup owns submit");
         } else {
             log("info", "HYBRID mode: CUDA mine m=" + std::to_string(forced_mine_m()) +
-                            " fixed; flush when lastblock newest m= OR /difficulty matches" +
+                            " fixed; flush when live /difficulty matches" +
                             (settings_.match_drain_max_s > 0
                                  ? (" (match_flush max " +
                                     std::to_string(settings_.match_drain_max_s) + "s)")
-                                 : " (until bag empty or both oracles leave)"));
+                                 : " (until bag empty or live diff leaves)"));
         }
         if (dashboard_) {
             dashboard_->set_mining_m(forced_mine_m(), true);
@@ -1657,8 +1587,6 @@ void Supervisor::run(std::optional<int> max_seconds) {
         double t = now_s();
         // Mining thread: network status + CUDA replan only. No HTTP submit here.
         refresh_network(false, /*replan_engine=*/true);
-        refresh_paper();
-        // CPU flush when paper/thermometer shows bag m=. Park CUDA only on live match.
         update_match_drain(t);
         maybe_check_update(t);
         maybe_reload_config(t);

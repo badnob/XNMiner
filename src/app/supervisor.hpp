@@ -14,7 +14,6 @@
 #include "monitoring/xenblockscan.hpp"
 #include "network/bag_forward.hpp"
 #include "network/difficulty.hpp"
-#include "network/lastblock.hpp"
 #include "network/submitter.hpp"
 #include "network/updater.hpp"
 #include "queue/store.hpp"
@@ -57,7 +56,6 @@ private:
     void log(const std::string& level, const std::string& msg);
     // replan_engine: only the mining thread may replan CUDA difficulty/VRAM.
     bool refresh_network(bool blocking = false, bool replan_engine = false);
-    void refresh_paper();
     bool oracle_says_m(int m) const;
     bool oracle_left_m(int m) const;
     int submit_target_m() const;
@@ -88,10 +86,10 @@ private:
     int bag_target_m() const;
     /// How many disk-queue hits can submit at current network m=.
     int matching_queue_depth() const;
-    /// Enter/exit aggressive HTTP flush when paper or thermometer shows bag m=.
+    /// Enter/exit aggressive HTTP flush when live /difficulty equals bag m=.
     void update_match_drain(double now);
     bool match_drain_active() const;
-    /// Park CUDA only when live /difficulty is bag m=. Mixed paper windows keep mining.
+    /// Park CUDA when live /difficulty is bag m=.
     bool should_park_cuda() const;
     void handle_batch_hits(MineBatchResult& batch);
 
@@ -106,7 +104,6 @@ private:
     std::unique_ptr<BagForwarder> bag_forward_;
     std::unique_ptr<CudaEngine> engine_;
     std::unique_ptr<NetworkPoller> poller_;
-    std::unique_ptr<LastblockPoller> paper_;
     std::unique_ptr<MinerDashboard> dashboard_;
     std::unique_ptr<GpuPowerBooster> power_;
     std::unique_ptr<WoodyminerUploader> woody_;
@@ -131,11 +128,6 @@ private:
     double last_difficulty_ok_at_ = 0;
     int difficulty_fail_streak_ = 0;
     uint64_t last_poll_seq_ = 0;
-    bool paper_ok_ = false;
-    std::optional<int> paper_newest_m_;
-    int paper_tip_id_ = 0;
-    double last_paper_ok_at_ = 0;
-    uint64_t last_paper_seq_ = 0;
     double defer_submit_until_ = 0;
     double submit_backoff_until_ = 0;  // after transport fail: queue only, keep mining
 
@@ -151,8 +143,7 @@ private:
     bool finalized_ = false;
     std::optional<VramCaps> vram_caps_;
 
-    // Match-drain: CPU flushes while paper/thermometer shows bag m=.
-    // CUDA parks only on live m= match, not to slow bag growth.
+    // Match-drain: CPU flushes while live /difficulty equals bag m=.
     std::atomic<bool> match_drain_active_{false};
     bool match_drain_gpu_parked_ = false;
     double match_drain_until_ = 0;
@@ -172,7 +163,7 @@ private:
     std::atomic<bool> submit_worker_running_{false};
 
     bool live_submit_allowed() const;
-    /// Queue flush gate: paper or last-good m= is enough (flaky /difficulty must not freeze the bag).
+    /// Queue flush gate: live /difficulty (or last-good) is enough.
     bool flush_submit_allowed() const;
     bool network_matches_hit_m(int hit_m) const;
     bool can_submit_hit_m(int hit_m) const;

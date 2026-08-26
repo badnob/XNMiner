@@ -109,7 +109,7 @@ Edit `miner.ini` (created from `miner.ini.example`):
 
 `vast.sh` watches GitHub. When `main` moves, it SIGTERM the miner (that **bags the queue to disk**), `git pull`s, rebuilds, and starts again. The miner also self-checks every 5 minutes and exits `75` for the same path. No manual stop. Do not interrupt a match-flush window — the checker waits.
 
-When paper or `/difficulty` matches bag `m=`, CPU brute-flushes `/verify` (256 / 1024 / 2048 in-flight from flush cores; 2048 on 25k+ bags when the box has 5+ flush cores). A 401/timeout no longer pauses the whole bag. Dummy `/verify` held 1024 in-flight with 0 timeouts (~23k–100k POSTs per 30s at ~300ms).
+When live `/difficulty` matches bag `m=`, CPU brute-flushes `/verify`. Lastblock paper is not used. A 401/timeout no longer pauses the whole bag.
 
 Needs `GH_TOKEN` (already required to clone the private repo).
 
@@ -163,7 +163,7 @@ curl -4 -fsS --max-time 15 -x "$VERIFY_PROXY" https://ifconfig.me
 cd /workspace/xnminer-low-dif-hybrid-blackwell && bash vast.sh
 ```
 
-`socks5h` resolves `xenblocks.io` on the exit. Woodyminer, GitHub auto-update, `/difficulty`, and lastblock stay on the box IP. With `VERIFY_PROXY` set, `vast.sh` uses flush width **64** (override with `MATCH_DRAIN_PARALLEL` / `MATCH_DRAIN_BATCH`). Tony.x1 stays direct — do not set a proxy there.
+`socks5h` resolves `xenblocks.io` on the exit. Woodyminer, GitHub auto-update, and `/difficulty` stay on the box IP. Tony.x1 can stay direct. Flush width is whatever `miner.ini` says (default 512).
 
 **3. Confirm** in `data/session.log`:
 

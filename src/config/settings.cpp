@@ -271,20 +271,10 @@ Settings load_settings(const std::filesystem::path& ini_path) {
     s.network_poll_timeout_s = get_i(ini, "server", "network_poll_timeout_s", s.network_poll_timeout_s);
     s.network_down_poll_interval_s =
         get_i(ini, "server", "network_down_poll_interval_s", s.network_down_poll_interval_s);
-    s.lastblock_url = trim(get(ini, "server", "lastblock_url", s.lastblock_url));
-    s.lastblock_url_fallback =
-        trim(get(ini, "server", "lastblock_url_fallback", s.lastblock_url_fallback));
-    s.lastblock_poll_interval_s =
-        get_i(ini, "server", "lastblock_poll_interval_s", s.lastblock_poll_interval_s);
-    s.lastblock_timeout_s = get_i(ini, "server", "lastblock_timeout_s", s.lastblock_timeout_s);
-    // One clock: /difficulty and lastblock must tick together or mixed
-    // paper-vs-net windows close the flush against itself.
+    // One clock: live /difficulty at 1s.
     if (s.network_poll_interval_s < 1) s.network_poll_interval_s = 1;
     s.network_down_poll_interval_s = s.network_poll_interval_s;
-    s.lastblock_poll_interval_s = s.network_poll_interval_s;
     if (s.network_poll_timeout_s < 1) s.network_poll_timeout_s = 1;
-    s.lastblock_timeout_s = s.network_poll_timeout_s;
-    if (s.lastblock_timeout_s < 1) s.lastblock_timeout_s = 1;
 
     s.strategy = to_lower(trim(get(ini, "mining", "strategy", s.strategy)));
     s.memory_cost = get_i(ini, "mining", "memory_cost", s.memory_cost);

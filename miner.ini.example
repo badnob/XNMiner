@@ -17,16 +17,10 @@ verify_proxy =
 # false = submit from this box IP. Save this file — the miner bags the queue and
 # restarts itself (same path as GitHub auto-update). Do not reboot the machine.
 verify_warp_socks = true
-# One clock for /difficulty and lastblock. Code forces these to match.
-# 1s tick = notice m=100 (and leaving it) as fast as the pool will tell us.
+# Live /difficulty poll (seconds). This is the only clock for /verify match.
 network_poll_interval_s = 1
 network_poll_timeout_s = 3
 network_down_poll_interval_s = 1
-lastblock_url = http://xenblocks.io:4445/getblocks/lastblock
-lastblock_url_fallback = http://xenblocks.io:4447/getblocks/lastblock
-lastblock_poll_interval_s = 1
-lastblock_poll_ms = 1000
-lastblock_timeout_s = 3
 send_pow_url = http://xenblocks.io:4446/send_pow
 # Credit is POST /verify only.
 send_pow_enabled = false
@@ -50,11 +44,11 @@ hash_len = 64
 force_mine_memory_cost = 100
 # Credit is POST /verify (not send_pow). false = bag-only, desktop submits.
 submit_enabled = true
-# CPU-flush when paper newest m= OR /difficulty matches bag.
+# CPU-flush when live /difficulty matches bag m=.
 match_drain_enabled = true
 # Start submitting once at least this many queued blocks match the current network.
 match_drain_min_queue = 1
-# Max seconds for one submit burst. 0 = keep flushing until the bag is empty or both oracles leave.
+# Max seconds for one submit burst. 0 = keep flushing until the bag is empty or live diff leaves.
 match_drain_max_s = 0
 # In-flight /verify workers during match-flush. 512 matched the live dummy peak.
 match_drain_parallel = 512

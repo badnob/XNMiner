@@ -288,11 +288,6 @@ void MinerDashboard::set_network(bool ok, std::optional<int> difficulty, bool st
     difficulty_ = difficulty;
 }
 
-void MinerDashboard::set_paper_m(std::optional<int> paper_m) {
-    std::lock_guard<std::mutex> lock(mu_);
-    paper_m_ = paper_m;
-}
-
 void MinerDashboard::set_mining_m(int mining_m, bool force_hybrid) {
     std::lock_guard<std::mutex> lock(mu_);
     mining_m_ = mining_m;
@@ -408,22 +403,17 @@ void MinerDashboard::render() {
     }
     {
         std::string netm = difficulty_ ? ("m=" + std::to_string(*difficulty_)) : "-";
-        std::string paper = paper_m_ ? ("m=" + std::to_string(*paper_m_)) : "-";
-        row(oss, cell("Difficulty", std::string(WHITE) + netm + RST) +
-                     cell("Last block", paper));
-        const bool net_match = force_hybrid_ && difficulty_ && *difficulty_ == mining_m_;
-        const bool paper_match = force_hybrid_ && paper_m_ && *paper_m_ == mining_m_;
         std::string match;
-        if (net_match || paper_match)
+        if (force_hybrid_ && difficulty_ && *difficulty_ == mining_m_)
             match = std::string(GREEN) + "MATCH" + RST;
-        else if (difficulty_ || paper_m_)
+        else if (difficulty_)
             match = std::string(YELLOW) + "waiting for match" + RST;
         else
             match = "-";
-        row(oss, cell("Window", match) +
-                     cell("CUDA", std::to_string(cuda_lanes_) + " lane" +
-                                      (cuda_lanes_ == 1 ? "" : "s") + " x " +
-                                      fmt_int(cuda_batch_)));
+        row(oss, cell("Difficulty", std::string(WHITE) + netm + RST) + cell("Window", match));
+        row(oss, cell("CUDA", std::to_string(cuda_lanes_) + " lane" +
+                                 (cuda_lanes_ == 1 ? "" : "s") + " x " + fmt_int(cuda_batch_)) +
+                     cell("", ""));
     }
 
     rule(oss);

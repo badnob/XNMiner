@@ -38,7 +38,6 @@ add_executable(xnminer
     ${SRC_DIR}/efficiency/thermal_policy.cpp
     ${SRC_DIR}/efficiency/gpu_power.cpp
     ${SRC_DIR}/network/difficulty.cpp
-    ${SRC_DIR}/network/lastblock.cpp
     ${SRC_DIR}/network/submitter.cpp
     ${SRC_DIR}/network/bag_forward.cpp
     ${SRC_DIR}/network/updater.cpp

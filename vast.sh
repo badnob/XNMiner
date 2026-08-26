@@ -234,9 +234,11 @@ apply_ini_env() {
     /^network_poll_interval_s[[:space:]]*=/ { print "network_poll_interval_s = 1"; next }
     /^network_poll_timeout_s[[:space:]]*=/ { print "network_poll_timeout_s = 3"; next }
     /^network_down_poll_interval_s[[:space:]]*=/ { print "network_down_poll_interval_s = 1"; next }
-    /^lastblock_poll_interval_s[[:space:]]*=/ { print "lastblock_poll_interval_s = 1"; next }
-    /^lastblock_poll_ms[[:space:]]*=/ { print "lastblock_poll_ms = 1000"; next }
-    /^lastblock_timeout_s[[:space:]]*=/ { print "lastblock_timeout_s = 3"; next }
+    /^lastblock_url[[:space:]]*=/ { next }
+    /^lastblock_url_fallback[[:space:]]*=/ { next }
+    /^lastblock_poll_interval_s[[:space:]]*=/ { next }
+    /^lastblock_poll_ms[[:space:]]*=/ { next }
+    /^lastblock_timeout_s[[:space:]]*=/ { next }
     /^keygen_threads[[:space:]]*=/ { print "keygen_threads = 12"; next }
     /^max_lanes[[:space:]]*=/ { print "max_lanes = 0"; next }
     /^target_vram_pct[[:space:]]*=/ { print "target_vram_pct = 80.0"; next }

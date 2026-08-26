@@ -26,13 +26,13 @@ Lanes, batch, and keygen are measured on **this** box at start (`0` in `miner.in
 
 ### 2. Park the GPU, flush on the CPU
 
-XenBlocks does not pay hashrate. It pays **accepted `POST /verify`**. During an `m=100` window the bottleneck is sockets, not SMs. I park CUDA so the flush cores own the machine, then brute `/verify` at **512 in-flight** (one wave per second). Mixed lastblock windows can keep mining while the matching bag goes out. HTTP 401/429 is a **hold**, not a reject — the hash stays in the bag. A timeout does not freeze a 90k queue.
+XenBlocks does not pay hashrate. It pays **accepted `POST /verify`**. During an `m=100` window the bottleneck is sockets, not SMs. I park CUDA so the flush cores own the machine, then brute `/verify` at **512 in-flight** (one wave per second). HTTP 401/429 is a **hold**, not a reject — the hash stays in the bag. A timeout does not freeze a 90k queue.
 
 That split — **hash on GPU, credit on CPU** — is the difference between a pretty MH/s number and blocks that actually land.
 
 ### 3. Low-difficulty force mining (hybrid `m=100`)
 
-Live network `m=` is often 1100. Hashing at 1100 on purpose is slow. I mine **always at `m=100`**, queue every hit, and watch two oracles (`/difficulty` and lastblock paper on `:4445` / `:4447`) at a 1s tick. When either oracle says the bag `m=` is live, the miner flushes. When they leave, CUDA resumes `m=100`. Classic “follow the network” is still there (`force_mine_memory_cost = 0`). Hybrid is the default because it is the correct model for this protocol.
+Live network `m=` is often 1100. Hashing at 1100 on purpose is slow. I mine **always at `m=100`**, queue every hit, and poll **only** `http://xenblocks.io/difficulty` once a second. That is what `/verify` checks. When live Net m= hits 100, the miner flushes. When it leaves, CUDA resumes `m=100`. Lastblock “paper” m= is not polled — it is sealed history and was opening flushes the pool would 401. Classic “follow the network” is still there (`force_mine_memory_cost = 0`). Hybrid is the default because it is the correct model for this protocol.
 
 ### 4. Same-IP `/verify` — a proxy, not a VPN
 
@@ -46,7 +46,7 @@ I isolated **only** `POST /verify` through a **userspace WARP SOCKS** on `127.0.
 
 | Piece | Default |
 |-------|---------|
-| Hybrid force-mine `m=100` + paper/thermometer flush | on |
+| Hybrid force-mine `m=100` + flush on live `/difficulty` | on |
 | GPU lanes / batch / keygen auto from this card | on |
 | Park CUDA + 6-core CPU `/verify` (512 × 512) | on |
 | WARP SOCKS for `/verify` only (`verify_warp_socks`) | **on** |

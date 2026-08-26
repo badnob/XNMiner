@@ -18,7 +18,6 @@ public:
     void stop();
     void set_status(const std::string& status);
     void set_network(bool ok, std::optional<int> difficulty, bool stale = false);
-    void set_paper_m(std::optional<int> paper_m);
     void set_mining_m(int mining_m, bool force_hybrid);
     void set_cuda_batch(int batch, int lanes, double thermal_scale = 1.0);
     void set_wallet_line(const std::string& line);
@@ -38,7 +37,6 @@ private:
     bool network_ok_ = false;
     bool network_stale_ = false;
     std::optional<int> difficulty_;
-    std::optional<int> paper_m_;
     int mining_m_ = 0;
     bool force_hybrid_ = false;
     int cuda_batch_ = 0;

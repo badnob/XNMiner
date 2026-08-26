@@ -21,12 +21,6 @@ struct Settings {
     int network_poll_timeout_s = 3;
     int network_down_poll_interval_s = 1;
 
-    // Newspaper oracle (sealed-block m=). Faster/healthier than /difficulty.
-    std::string lastblock_url = "http://xenblocks.io:4445/getblocks/lastblock";
-    std::string lastblock_url_fallback = "http://xenblocks.io:4447/getblocks/lastblock";
-    int lastblock_poll_interval_s = 1;
-    int lastblock_timeout_s = 3;
-
     std::string strategy = "random";
     int memory_cost = 1100;
     int time_cost = 1;
@@ -41,7 +35,7 @@ struct Settings {
     // enables flush without a missing-key bag-only fallback.
     bool submit_enabled = true;
 
-    // CPU-flush while paper newest m= or /difficulty matches bag.
+    // CPU-flush while live /difficulty matches bag.
     // Forced off when submit_enabled is false.
     bool match_drain_enabled = true;
     // Enter flush mode when at least this many pending blocks match current net m=.
