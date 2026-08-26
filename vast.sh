@@ -114,6 +114,8 @@ chmod +x build.sh start-miner.sh install-deps.sh vast.sh \
   scripts/detect-hardware.sh scripts/ensure-cuda13.sh scripts/hard-restart.sh 2>/dev/null || true
 
 if command -v nvidia-smi >/dev/null 2>&1; then
+  echo "GPU kernel driver is the Vast host module — not replaced on git push."
+  nvidia-smi --query-gpu=name,driver_version,compute_cap --format=csv
   nvidia-smi -pm 1 >/dev/null 2>&1 || true
   maxpl="$(nvidia-smi --query-gpu=power.max_limit --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -d '[:space:]')"
   if [[ -n "${maxpl}" ]]; then
@@ -173,7 +175,7 @@ apply_ini_env() {
     /^lastblock_poll_interval_s[[:space:]]*=/ { print "lastblock_poll_interval_s = 1"; next }
     /^lastblock_poll_ms[[:space:]]*=/ { print "lastblock_poll_ms = 1000"; next }
     /^lastblock_timeout_s[[:space:]]*=/ { print "lastblock_timeout_s = 3"; next }
-    /^keygen_threads[[:space:]]*=/ { print "keygen_threads = 0"; next }
+    /^keygen_threads[[:space:]]*=/ { print "keygen_threads = 12"; next }
     /^max_lanes[[:space:]]*=/ { print "max_lanes = 0"; next }
     /^target_vram_pct[[:space:]]*=/ { print "target_vram_pct = 80.0"; next }
     /^desktop_headroom_pct[[:space:]]*=/ { print "desktop_headroom_pct = 20.0"; next }
@@ -190,9 +192,9 @@ apply_ini_env() {
     /^gpu_thermal_start_scale[[:space:]]*=/ { print "gpu_thermal_start_scale = 0.70"; next }
     /^gpu_cooldown_s[[:space:]]*=/ { print "gpu_cooldown_s = 20"; next }
     /^desktop_cpu_cores[[:space:]]*=/ { print "desktop_cpu_cores = 0"; next }
-    /^bag_sort_cpu_cores[[:space:]]*=/ { print "bag_sort_cpu_cores = 0"; next }
-    /^flush_cpu_cores[[:space:]]*=/ { print "flush_cpu_cores = 0"; next }
-    /^dashboard_cpu_cores[[:space:]]*=/ { print "dashboard_cpu_cores = 0"; next }
+    /^bag_sort_cpu_cores[[:space:]]*=/ { print "bag_sort_cpu_cores = 2"; next }
+    /^flush_cpu_cores[[:space:]]*=/ { print "flush_cpu_cores = 2"; next }
+    /^dashboard_cpu_cores[[:space:]]*=/ { print "dashboard_cpu_cores = 2"; next }
     { print }
     END {
       if (!se) print "submit_enabled = true"

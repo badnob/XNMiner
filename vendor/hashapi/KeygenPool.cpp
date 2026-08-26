@@ -21,35 +21,19 @@
 #else
 #include <pthread.h>
 #include <sched.h>
-#include <unistd.h>
 #endif
 
 namespace hashapi {
 namespace {
 
+constexpr int kDefaultThreads = 12;  // desktop: 6 physical cores × SMT
 constexpr int kMinThreads = 2;
 constexpr int kMaxThreads = 16;
 
-int online_cpus() {
-#ifdef _WIN32
-    SYSTEM_INFO si{};
-    GetSystemInfo(&si);
-    int n = static_cast<int>(si.dwNumberOfProcessors);
-#else
-    const long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
-    int n = static_cast<int>(ncpu);
-#endif
-    if (n < 1) n = 1;
-    return n;
-}
-
 int clamp_threads(int requested) {
-    const int ncpu = online_cpus();
-    const int cap = std::max(kMinThreads, std::min(kMaxThreads, ncpu));
     int n = requested;
-    // 0 = half the machine, not every CPU — flush/bag/CUDA host need the rest.
-    if (n <= 0) n = std::max(kMinThreads, std::min(kMaxThreads, ncpu / 2));
-    return std::max(kMinThreads, std::min(cap, n));
+    if (n <= 0) n = kDefaultThreads;
+    return std::max(kMinThreads, std::min(kMaxThreads, n));
 }
 
 struct Job {
@@ -147,7 +131,7 @@ private:
     }
 
     void worker_loop() {
-        xn::cpu::pin_this_thread(xn::cpu::Role::CudaHost);
+        xn::cpu::pin_this_thread(xn::cpu::Role::Keygen);
         RandomHexKeyGenerator gen("", 64);
         for (;;) {
             Job job;
@@ -174,27 +158,33 @@ private:
     }
 
     void pin_workers() {
-        const int ncpu = online_cpus();
+        // Desktop shape: first 6 physical cores (not the CUDA-host spin slice).
+        const auto cpus = xn::cpu::keygen_cpu_list();
 #ifdef _WIN32
-        // Spread across whatever LPs this machine actually has (Vast 7800X3D,
-        // desktop 9950X3D, SMT on or off). Do not assume a 12-LP first CCD.
-        int i = 0;
+        DWORD_PTR mask = 0;
+        if (cpus.empty()) {
+            mask = (static_cast<DWORD_PTR>(1) << 12) - 1;
+        } else {
+            for (int c : cpus) {
+                if (c >= 0 && c < 64) mask |= (static_cast<DWORD_PTR>(1) << c);
+            }
+        }
         for (auto& t : workers_) {
             HANDLE h = reinterpret_cast<HANDLE>(t.native_handle());
-            if (h == nullptr) continue;
-            const int cpu = i % ncpu;
-            DWORD_PTR mask = static_cast<DWORD_PTR>(1) << cpu;
-            SetThreadAffinityMask(h, mask);
-            ++i;
+            if (h != nullptr && mask) SetThreadAffinityMask(h, mask);
         }
 #else
-        int i = 0;
+        cpu_set_t set;
+        CPU_ZERO(&set);
+        if (cpus.empty()) {
+            for (int c = 0; c < 12 && c < CPU_SETSIZE; ++c) CPU_SET(c, &set);
+        } else {
+            for (int c : cpus) {
+                if (c >= 0 && c < CPU_SETSIZE) CPU_SET(c, &set);
+            }
+        }
         for (auto& t : workers_) {
-            cpu_set_t set;
-            CPU_ZERO(&set);
-            CPU_SET(i % ncpu, &set);
             pthread_setaffinity_np(t.native_handle(), sizeof(set), &set);
-            ++i;
         }
 #endif
     }

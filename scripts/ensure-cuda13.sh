@@ -22,7 +22,8 @@ nvcc_major() {
 
 find_cuda13_home() {
   local d
-  for d in /usr/local/cuda-13.3 /usr/local/cuda-13.2 /usr/local/cuda-13.1 /usr/local/cuda-13.0 \
+  for d in /usr/local/cuda-13.6 /usr/local/cuda-13.5 /usr/local/cuda-13.4 /usr/local/cuda-13.3 \
+           /usr/local/cuda-13.2 /usr/local/cuda-13.1 /usr/local/cuda-13.0 \
            /usr/local/cuda; do
     local maj
     maj="$(nvcc_major "${d}/bin/nvcc" || true)"
@@ -88,14 +89,18 @@ install_cuda13_packages() {
   }
   export DEBIAN_FRONTEND=noninteractive
   # Never pull a driver stack. Hold common driver packages just in case.
+  # Vast injects the GPU *kernel* module (580.x today). Do not install
+  # nvidia-driver-610 / cuda-drivers — that desyncs libcuda from the host
+  # and nvidia-smi dies until reboot, which rental boxes often cannot do.
+  # Latest we can apply on push: CUDA 13.x nvcc (desktop 16 MH/s compiler).
   as_root apt-mark hold nvidia-driver nvidia-driver-580 nvidia-driver-570 \
-    nvidia-open cuda-drivers cuda-drivers-580 2>/dev/null || true
+    nvidia-driver-610 nvidia-open cuda-drivers cuda-drivers-580 cuda-drivers-570 2>/dev/null || true
 
   add_nvidia_cuda_repo || true
   as_root apt-get update -y
 
   local ver pkgs
-  for ver in 13-3 13-2 13-1 13-0; do
+  for ver in 13-6 13-5 13-4 13-3 13-2 13-1 13-0; do
     pkgs=(
       "cuda-nvcc-${ver}"
       "cuda-cudart-dev-${ver}"
@@ -126,6 +131,9 @@ export_cuda13() {
 }
 
 ensure_cuda13() {
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    echo "GPU driver (host-injected, not upgraded): $(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n1)"
+  fi
   local home
   if home="$(find_cuda13_home)"; then
     export_cuda13 "${home}"

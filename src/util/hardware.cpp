@@ -54,11 +54,12 @@ HardwareProfile probe_hardware(int device_id) {
     HardwareProfile p;
     p.device_id = std::max(0, device_id);
     p.cpu_cores = cpu::online_count();
-    int kg = p.cpu_cores / 2;
-    if (kg < 2) kg = 2;
-    if (kg > 16) kg = 16;
-    if (p.cpu_cores >= 1 && kg > p.cpu_cores) kg = p.cpu_cores;
-    p.suggested_keygen = kg;
+    p.suggested_keygen = 12;
+    if (p.cpu_cores > 0 && p.cpu_cores < 12) {
+        int kg = std::max(2, p.cpu_cores);
+        if (kg > 16) kg = 16;
+        p.suggested_keygen = kg;
+    }
 
     int count = 0;
     cudaError_t st = cudaGetDeviceCount(&count);

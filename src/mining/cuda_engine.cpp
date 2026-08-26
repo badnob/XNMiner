@@ -414,7 +414,6 @@ void CudaEngine::start() {
 
     int kg = settings_.keygen_threads;
     if (kg <= 0) kg = cpu::suggested_keygen_threads();
-    kg = std::min(kg, cpu::cuda_host_count());
     if (kg < 2) kg = 2;
     if (kg > 16) kg = 16;
     hashapi::configureKeygenPool(kg);

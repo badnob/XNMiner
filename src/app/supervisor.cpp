@@ -1451,10 +1451,8 @@ void Supervisor::run(std::optional<int> max_seconds) {
                             " MiB → " + std::to_string(hw.suggested_lanes) + " lanes, ~" +
                             std::to_string(hw.suggested_batch_m100) + " hashes/lane at m=100)");
         }
-        if (settings_.keygen_threads <= 0) {
-            log("info", "Keygen auto from CPU (" + std::to_string(hw.cpu_cores) + " cores → " +
-                            std::to_string(hw.suggested_keygen) + " threads, capped by CUDA host)");
-        }
+        log("info", "Keygen " + std::to_string(hw.suggested_keygen) +
+                        " threads (desktop shape) — pinned off CUDA-host spin cores");
     }
 
     if (dashboard_) {
@@ -1533,11 +1531,12 @@ void Supervisor::run(std::optional<int> max_seconds) {
         }
         log("info", "CUDA device: " + engine_->device_name());
         log("info", "Keygen pool: " + std::to_string(hashapi::keygenPoolThreads()) +
-                        " threads (requested " +
+                        " threads on first 6 physical cores (requested " +
                         (settings_.keygen_threads > 0 ? std::to_string(settings_.keygen_threads)
-                                                     : std::string("auto")) +
-                        ", CUDA host " + std::to_string(cpu::cuda_host_count()) + ") — " +
-                        std::to_string(engine_->active_lanes()) + " lanes share it");
+                                                     : std::string("12")) +
+                        ", CUDA host " + std::to_string(cpu::cuda_host_count()) +
+                        " last cores spin) — " + std::to_string(engine_->active_lanes()) +
+                        " lanes share the pool, not the CUDA-host cores");
         if (engine_) {
             log("info", std::to_string(engine_->active_lanes()) +
                             "-wide keep-hot pipeline (next keys overlap oneshot, 2-deep ring)");

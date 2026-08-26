@@ -131,17 +131,13 @@ jsonl_path = data/queue.jsonl
 rejected_jsonl_path = data/rejected.jsonl
 # Old setting. Submits already run on their own CPU thread — leave at 0.30.
 submit_cpu_fraction = 0.30
-# CPU split is measured from nproc at start. 0 = auto (recommended for new users).
-# Vast / dedicated miner: desktop_cpu_cores = 0 (no cores reserved for a desktop session).
-# Linux desktop: set 2–8 to leave cores for the rest of the machine.
+# CPU split is physical cores. Dedicated Vast (8-core 7800X3D):
+# last 2 = CUDA host (spin-wait), first 6 = keygen (12 SMT threads).
+# bag/flush/dashboard share the keygen cores (IO wait, not spin).
 desktop_cpu_cores = 0
-# 0 = auto from this box's core count.
-# 16-core: bag 2, flush 4, dashboard 2, CUDA host the rest.
-# 8-core:  bag 1, flush 2, dashboard 1, CUDA host the rest.
-# 4-core:  flush 1, CUDA host the rest (bag/dashboard share).
-bag_sort_cpu_cores = 0
-flush_cpu_cores = 0
-dashboard_cpu_cores = 0
+bag_sort_cpu_cores = 2
+flush_cpu_cores = 2
+dashboard_cpu_cores = 2
 # Copy every queued hit to the Windows home vault. Local bag stays and still flushes.
 # Example: http://YOUR.HOME.IP:18787/bag
 bag_forward_url =
@@ -190,9 +186,10 @@ sha_path = data/build_sha
 # All 0 values below mean "measure this GPU / CPU at start". That is the
 # new-user default. Only set a number if you want to override auto-detect.
 #
-# CPU threads that generate new keys for all GPU lanes to share.
-# 0 = auto (CUDA host cores, max 16). Do not set 12 on an 8-core box — it starves the GPU.
-keygen_threads = 0
+# 12 = desktop (6 physical cores × SMT), pinned OFF the CUDA-host spin cores.
+# An 8-core Vast box matches the desktop 16-core miner slice. Do not clamp this
+# to CUDA host count — that is what left Vast at ~60% GPU util.
+keygen_threads = 12
 # Which NVIDIA card to use. 0 = the first card.
 device_id = 0
 # Fixed hashes per lane. 0 = pick the size automatically from this card's VRAM (recommended).

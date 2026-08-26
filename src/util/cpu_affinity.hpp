@@ -1,25 +1,28 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 namespace xn {
 namespace cpu {
 
-enum class Role { Bag, Flush, Dashboard, CudaHost };
+enum class Role { Bag, Flush, Dashboard, CudaHost, Keygen };
 
-// Split CPUs from this machine's online count. 0 for bag/flush/dashboard = auto.
-// desktop_cores=0 means dedicated miner (Vast): no cores reserved for a desktop session.
+// Split CPUs from physical cores (not SMT threads).
+// Dedicated miner (desktop_cores=0, 8+ physical): bag 2, flush 2, dashboard 2,
+// CUDA host = last 2 physical cores. Keygen uses the first 6 — not the CUDA
+// host slice — matching the Windows desktop 9950X3D layout on a Vast 8-core.
 void init_layout(int desktop_cores, int bag_cores, int flush_cores, int dashboard_cores);
 
 void pin_this_thread(Role role);
 
 int online_count();
+int physical_core_count();
 int flush_cpu_count();
 int cuda_host_count();
-// Keygen workers: min(16, CUDA host CPUs), at least 2. Leaves flush/bag cores free.
+// Desktop default: 12 threads (6 physical cores × SMT). Not clamped to CUDA host.
 int suggested_keygen_threads();
-// IO-bound /verify cap from flush CPUs (256 / 1024 / 2048).
-// 1024 in-flight held 0 timeouts on dummy /verify (2026-08-25).
+std::vector<int> keygen_cpu_list();
 int flush_http_cap();
 
 std::string layout_summary();

@@ -361,9 +361,9 @@ Settings load_settings(const std::filesystem::path& ini_path) {
         resolve_path(s.root, get(ini, "queue", "rejected_jsonl_path", "data/rejected.jsonl"));
     s.submit_cpu_fraction = get_d(ini, "queue", "submit_cpu_fraction", s.submit_cpu_fraction);
     s.desktop_cpu_cores = get_i(ini, "queue", "desktop_cpu_cores", 0);
-    s.bag_sort_cpu_cores = get_i(ini, "queue", "bag_sort_cpu_cores", 0);
-    s.flush_cpu_cores = get_i(ini, "queue", "flush_cpu_cores", 0);
-    s.dashboard_cpu_cores = get_i(ini, "queue", "dashboard_cpu_cores", 0);
+    s.bag_sort_cpu_cores = get_i(ini, "queue", "bag_sort_cpu_cores", 2);
+    s.flush_cpu_cores = get_i(ini, "queue", "flush_cpu_cores", 2);
+    s.dashboard_cpu_cores = get_i(ini, "queue", "dashboard_cpu_cores", 2);
     if (s.desktop_cpu_cores < 0) s.desktop_cpu_cores = 0;
     if (s.bag_sort_cpu_cores < 0) s.bag_sort_cpu_cores = 0;
     if (s.flush_cpu_cores < 0) s.flush_cpu_cores = 0;
@@ -419,7 +419,7 @@ Settings load_settings(const std::filesystem::path& ini_path) {
     if (s.cuda_max_lanes < 0) s.cuda_max_lanes = 0;
     if (s.cuda_max_lanes > 8) s.cuda_max_lanes = 8;
     s.cuda_lane_reserve = get_i(ini, "cuda", "lane_reserve", 1);
-    s.keygen_threads = get_i(ini, "cuda", "keygen_threads", 0);
+    s.keygen_threads = get_i(ini, "cuda", "keygen_threads", 12);
     if (s.keygen_threads < 0) s.keygen_threads = 0;
     if (s.keygen_threads > 16) s.keygen_threads = 16;
     s.work_patches = get_i(ini, "cuda", "work_patches", 2);

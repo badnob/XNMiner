@@ -75,8 +75,8 @@ There is no pre-filled address, worker, Woodyminer name, tracker id, lock, or qu
 Edit `miner.ini` (created from `miner.ini.example`):
 
 - `[account] address` / `worker`
-- `[cuda] max_lanes` / `keygen_threads` / `batch_size` — leave at **0** to auto-size from this box's VRAM and CPU count
-- `[queue] desktop_cpu_cores` / `flush_cpu_cores` / `bag_sort_cpu_cores` / `dashboard_cpu_cores` — **0 = auto from nproc**. Dedicated Vast boxes keep `desktop_cpu_cores = 0`
+- `[cuda] max_lanes` / `batch_size` — **0** = auto from VRAM. `keygen_threads = 12` (desktop; pinned off CUDA-host cores)
+- `[queue] desktop_cpu_cores = 0`, bag/flush/dashboard **2** on an 8-core Vast box. CUDA host is the last 2 physical cores.
 - `[efficiency]` VRAM 80%, mem-junc 85/81, miner power-limit **off**
 - `[mining] match_drain_parallel = 0` auto-caps `/verify` workers from flush cores (256 / 1024 / 2048). Dummy `/verify` held 1024 in-flight with 0 timeouts; ~23k–100k POSTs per 30s at ~300ms.
 - `[queue] bag_forward_url` / `bag_forward_token` — copy queued hits to the Windows home vault

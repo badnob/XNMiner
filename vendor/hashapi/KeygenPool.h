@@ -5,8 +5,8 @@
 
 namespace hashapi {
 
-/// Persistent keygen workers. 0 = half of online CPUs (max 16), then CUDA host cap.
-/// Pack-wide: all 8 lanes share this pool (no 8×N spawn storm).
+/// Persistent keygen workers. 0 = 12 threads (6 physical cores × SMT), pinned
+/// off the CUDA-host spin cores so 8 lanes do not starve the GPU.
 void configureKeygenPool(int threads);
 int keygenPoolThreads();
 /// Fill `count` keys of `key_length` hex chars into a flat arena (count * key_length).

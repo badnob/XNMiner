@@ -100,9 +100,9 @@ struct Settings {
     // 0 = dedicated miner (Vast): no cores reserved. Linux desktop can set 2–8.
     int desktop_cpu_cores = 0;
     // 0 = auto from online CPU count (bag / flush / dashboard / CUDA host).
-    int bag_sort_cpu_cores = 0;
-    int flush_cpu_cores = 0;
-    int dashboard_cpu_cores = 0;
+    int bag_sort_cpu_cores = 2;
+    int flush_cpu_cores = 2;
+    int dashboard_cpu_cores = 2;
     // Copy every queued hit to the Windows home vault. Empty = local bag only.
     std::string bag_forward_url;
     std::string bag_forward_token;
@@ -135,8 +135,9 @@ struct Settings {
     // 0 = auto from this card's total VRAM (~3.5 GiB/lane at m=100). 8 GB→2, 16→4, 32→8.
     int cuda_max_lanes = 0;
     int cuda_lane_reserve = 1;
-    /// Shared keygen pool. 0 = auto (CUDA host CPUs, max 16). Never more than host cores.
-    int keygen_threads = 0;
+    /// Shared keygen pool. 0 = 12 threads on the first 6 physical cores (desktop).
+    /// Not clamped to CUDA-host count — those cores spin-wait the GPU.
+    int keygen_threads = 12;
     /// VRAM work patches. 2 = half working / half preloaded. 3 = later trifecta.
     /// All lanes hash one patch; the others only store the next job(s).
     int work_patches = 2;
