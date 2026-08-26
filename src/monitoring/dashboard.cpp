@@ -188,19 +188,32 @@ std::string paint_kind(const std::string& kind) {
     return std::string(kind_color(kind)) + kind + RST;
 }
 
+std::string color_kinds(std::string s) {
+    auto repl = [&](const char* k) {
+        const std::string painted = paint_kind(k);
+        const std::size_t klen = std::char_traits<char>::length(k);
+        std::size_t pos = 0;
+        while ((pos = s.find(k, pos)) != std::string::npos) {
+            s.replace(pos, klen, painted);
+            pos += painted.size();
+        }
+    };
+    repl("XBLK");
+    repl("XUNI");
+    repl("XNM");
+    return s;
+}
+
 std::string layman_event(const std::string& action, const std::string& block,
                          const std::string& detail) {
-    if (action == "FOUND") return std::string("Found ") + paint_kind(block);
+    if (action == "FOUND") return "Found " + block;
     if (action == "QUEUED") {
-        if (detail.find("network") != std::string::npos)
-            return "Saved " + paint_kind(block) + " — net down";
-        if (detail.find("pool takes") != std::string::npos)
-            return "Saved " + paint_kind(block) + " — pool busy";
+        if (detail.find("network") != std::string::npos) return "Saved " + block + " - net down";
+        if (detail.find("pool takes") != std::string::npos) return "Saved " + block + " - pool busy";
         if (detail.find("difficulty") != std::string::npos)
-            return "Saved " + paint_kind(block) + " — wait for match";
-        if (detail.find("XUNI") != std::string::npos)
-            return "Saved " + paint_kind(block) + " — wait :55";
-        return "Saved " + paint_kind(block) + " in bag";
+            return "Saved " + block + " - wait for match";
+        if (detail.find("XUNI") != std::string::npos) return "Saved " + block + " - wait :55";
+        return "Saved " + block + " in bag";
     }
     if (action == "ACCEPTED") {
         if (block == "QUEUE") {
@@ -208,11 +221,11 @@ std::string layman_event(const std::string& action, const std::string& block,
             std::string n = (p != std::string::npos) ? detail.substr(p + 1) : detail;
             return "Pool paid bag x" + n;
         }
-        return "Pool paid " + paint_kind(block);
+        return "Pool paid " + block;
     }
-    if (action == "RESUBMIT") return "Retry " + paint_kind(block);
-    std::string e = action + "  " + block;
-    if (!detail.empty()) e += "  " + detail;
+    if (action == "RESUBMIT") return "Retry " + block;
+    std::string e = action + " " + block;
+    if (!detail.empty()) e += " " + detail;
     return e;
 }
 
@@ -507,7 +520,7 @@ void MinerDashboard::render() {
         else if (ev.find("Retry") != std::string::npos || ev.find("fail") != std::string::npos ||
                  ev.find("ERROR") != std::string::npos)
             ec = RED;
-        row(oss, std::string("  ") + ec + clip_vis(ev, kWidth - 4) + RST);
+        row(oss, std::string("  ") + ec + color_kinds(clip_vis(ev, kWidth - 4)) + RST);
     }
 
     rule(oss);
