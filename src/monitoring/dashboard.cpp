@@ -25,6 +25,7 @@ constexpr const char* GREEN = "\x1b[32m";
 constexpr const char* YELLOW = "\x1b[33m";
 constexpr const char* RED = "\x1b[31m";
 constexpr const char* WHITE = "\x1b[37m";
+constexpr const char* PURPLE = "\x1b[35m";
 constexpr const char* CLR_EOL = "\x1b[K";
 
 constexpr int kWidth = 78;
@@ -176,6 +177,45 @@ std::string cell(const char* name, const std::string& value, int width = kHalf) 
     return pad_vis(label(name) + value, width);
 }
 
+const char* kind_color(const std::string& kind) {
+    if (kind == "XNM") return GREEN;
+    if (kind == "XBLK") return RED;
+    if (kind == "XUNI") return YELLOW;
+    return WHITE;
+}
+
+std::string paint_kind(const std::string& kind) {
+    return std::string(kind_color(kind)) + kind + RST;
+}
+
+std::string layman_event(const std::string& action, const std::string& block,
+                         const std::string& detail) {
+    if (action == "FOUND") return std::string("Found ") + paint_kind(block);
+    if (action == "QUEUED") {
+        if (detail.find("network") != std::string::npos)
+            return "Saved " + paint_kind(block) + " — net down";
+        if (detail.find("pool takes") != std::string::npos)
+            return "Saved " + paint_kind(block) + " — pool busy";
+        if (detail.find("difficulty") != std::string::npos)
+            return "Saved " + paint_kind(block) + " — wait for match";
+        if (detail.find("XUNI") != std::string::npos)
+            return "Saved " + paint_kind(block) + " — wait :55";
+        return "Saved " + paint_kind(block) + " in bag";
+    }
+    if (action == "ACCEPTED") {
+        if (block == "QUEUE") {
+            auto p = detail.rfind(' ');
+            std::string n = (p != std::string::npos) ? detail.substr(p + 1) : detail;
+            return "Pool paid bag x" + n;
+        }
+        return "Pool paid " + paint_kind(block);
+    }
+    if (action == "RESUBMIT") return "Retry " + paint_kind(block);
+    std::string e = action + "  " + block;
+    if (!detail.empty()) e += "  " + detail;
+    return e;
+}
+
 std::vector<std::string> split_holdings(const std::string& line) {
     std::vector<std::string> parts;
     std::string cur;
@@ -266,9 +306,7 @@ void MinerDashboard::set_uptime_s(int uptime_s) {
 void MinerDashboard::event(const std::string& action, const std::string& block,
                            const std::string& detail) {
     std::lock_guard<std::mutex> lock(mu_);
-    std::string e = ascii_clean(action + "  " + block);
-    if (!detail.empty()) e += "  " + ascii_clean(detail);
-    events_.push_back(std::move(e));
+    events_.push_back(ascii_clean(layman_event(action, block, detail)));
     if (events_.size() > 4) events_.erase(events_.begin());
 }
 
@@ -311,7 +349,7 @@ void MinerDashboard::render() {
     rule(oss);
 
     const bool flushing = status_.rfind("FLUSH", 0) == 0;
-    row(oss, cell("Uptime", std::string(DIM) + fmt_uptime(uptime_s_) + RST));
+    row(oss, cell("Uptime", std::string(PURPLE) + fmt_uptime(uptime_s_) + RST));
     if (flushing) {
         // "FLUSH 15/16 in flight · cleared 1188 (new 1171) · bag 92021"
         std::string rest = status_.size() > 6 ? status_.substr(6) : status_;
@@ -336,7 +374,7 @@ void MinerDashboard::render() {
         if (!bag.empty()) row(oss, cell("Bag", bag));
     }
     row(oss, cell("Wallet", std::string(CYAN) + short_addr(settings_.address) + RST) +
-                 cell("Worker", settings_.worker));
+                 cell("Worker", std::string(CYAN) + settings_.worker + RST));
 
     {
         std::string net;
@@ -358,14 +396,15 @@ void MinerDashboard::render() {
     {
         std::string netm = difficulty_ ? ("m=" + std::to_string(*difficulty_)) : "-";
         std::string paper = paper_m_ ? ("m=" + std::to_string(*paper_m_)) : "-";
-        row(oss, cell("Net m=", std::string(WHITE) + netm + RST) + cell("Paper m=", paper));
+        row(oss, cell("Difficulty", std::string(WHITE) + netm + RST) +
+                     cell("Last block", paper));
         const bool net_match = force_hybrid_ && difficulty_ && *difficulty_ == mining_m_;
         const bool paper_match = force_hybrid_ && paper_m_ && *paper_m_ == mining_m_;
         std::string match;
         if (net_match || paper_match)
             match = std::string(GREEN) + "MATCH" + RST;
         else if (difficulty_ || paper_m_)
-            match = std::string(YELLOW) + "queue until match" + RST;
+            match = std::string(YELLOW) + "waiting for match" + RST;
         else
             match = "-";
         row(oss, cell("Window", match) +
@@ -382,20 +421,23 @@ void MinerDashboard::render() {
                  cell("Queued", (stats_.queued ? std::string(YELLOW) : std::string(DIM)) +
                                     fmt_int(stats_.queued) + RST));
     {
+        const std::string sub = std::string(DIM) + "F/A" + RST;
+        int left = (kWidth - vis_len(sub)) / 2;
+        if (left < 0) left = 0;
+        row(oss, std::string(static_cast<size_t>(left), ' ') + sub);
         int ax = stats_.accepted_live_xuni + stats_.accepted_flush_xuni;
         int an = stats_.accepted_live_xnm + stats_.accepted_flush_xnm;
         int ab = stats_.accepted_live_xblk + stats_.accepted_flush_xblk;
         std::ostringstream b;
-        b << "XNM " << fmt_int(stats_.found_xnm) << "/" << fmt_int(an) << "   XBLK "
-          << fmt_int(stats_.found_xblk) << "/" << fmt_int(ab) << "   XUNI "
-          << fmt_int(stats_.found_xuni) << "/" << fmt_int(ax);
-        row(oss, cell("Blocks", b.str()) +
-                     cell("F/A", fmt_int(stats_.found_total()) + "/" +
-                                     std::string(GREEN) + fmt_int(stats_.accepted_total()) + RST));
+        b << paint_kind("XNM") << " " << fmt_int(stats_.found_xnm) << "/" << fmt_int(an)
+          << "   " << paint_kind("XBLK") << " " << fmt_int(stats_.found_xblk) << "/" << fmt_int(ab)
+          << "   " << paint_kind("XUNI") << " " << fmt_int(stats_.found_xuni) << "/" << fmt_int(ax);
+        row(oss, cell("Blocks", b.str()));
     }
     {
         std::ostringstream b;
-        b << "XNM " << fmt_int(pending_xnm_) << "   XBLK " << fmt_int(pending_xblk_) << "   XUNI "
+        b << paint_kind("XNM") << " " << fmt_int(pending_xnm_) << "   " << paint_kind("XBLK")
+          << " " << fmt_int(pending_xblk_) << "   " << paint_kind("XUNI") << " "
           << fmt_int(pending_xuni_);
         row(oss, cell("Bag split", b.str()));
     }
@@ -405,8 +447,9 @@ void MinerDashboard::render() {
         row(oss, cell("GPU", ascii_clean(gpu_->name)));
         double vram_pct = gpu_->total_mib > 0 ? (100.0 * gpu_->used_mib / gpu_->total_mib) : 0.0;
         std::ostringstream vram;
-        vram << fmt_int(gpu_->used_mib) << " / " << fmt_int(gpu_->total_mib) << " MiB  "
-             << std::fixed << std::setprecision(0) << vram_pct << "%";
+        vram << std::fixed << std::setprecision(1) << (gpu_->used_mib / 1024.0) << "/"
+             << std::setprecision(1) << (gpu_->total_mib / 1024.0) << " GB  "
+             << std::setprecision(0) << vram_pct << "%";
         row(oss, cell("Util", std::to_string(gpu_->util_pct) + " %") + cell("VRAM", vram.str()));
         const char* tc =
             temp_color(gpu_->temperature_c, settings_.warn_gpu_temp_c, settings_.max_gpu_temp_c);
@@ -457,11 +500,11 @@ void MinerDashboard::render() {
             continue;
         }
         const char* ec = WHITE;
-        if (ev.find("ACCEPT") != std::string::npos || ev.find("FOUND") != std::string::npos)
+        if (ev.find("Paid") != std::string::npos || ev.find("Found") != std::string::npos)
             ec = GREEN;
-        else if (ev.find("QUEUE") != std::string::npos || ev.find("WARN") != std::string::npos)
+        else if (ev.find("Saved") != std::string::npos || ev.find("wait") != std::string::npos)
             ec = YELLOW;
-        else if (ev.find("REJECT") != std::string::npos || ev.find("FAIL") != std::string::npos ||
+        else if (ev.find("Retry") != std::string::npos || ev.find("fail") != std::string::npos ||
                  ev.find("ERROR") != std::string::npos)
             ec = RED;
         row(oss, std::string("  ") + ec + clip_vis(ev, kWidth - 4) + RST);
