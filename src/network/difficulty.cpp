@@ -5,9 +5,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cctype>
 #include <optional>
+#include <thread>
 
 namespace xn {
 namespace {
@@ -83,25 +85,41 @@ NetworkStatus NetworkPoller::get_status() const {
 
 NetworkStatus NetworkPoller::poll_once(int timeout_s) {
     int t = timeout_s > 0 ? timeout_s : timeout_s_;
+    if (t < 1) t = 1;
+    // Short GET + two retries. A long hang hid whole m=100 windows. /difficulty is
+    // cheap; total blind time stays under ~5s (2.5s then 1s + 1s).
+    const int first_ms = std::min(t * 1000, 2500);
+    const int retry_ms = 1000;
     auto t0 = std::chrono::steady_clock::now();
-    auto resp = http_get(url_, t * 1000);
-    auto t1 = std::chrono::steady_clock::now();
     NetworkStatus st;
-    st.latency_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-    if (resp.status >= 200 && resp.status < 300) {
-        auto d = parse_difficulty_body(resp.body);
-        if (d) {
-            st.difficulty = *d;
-            st.ok = true;
-        } else {
-            st.ok = false;
-            st.error = "invalid difficulty body";
+    st.ok = false;
+    st.error = "no response";
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        if (attempt > 0) {
+            const int jitter_ms =
+                40 + static_cast<int>(
+                         (std::chrono::steady_clock::now().time_since_epoch().count() / 1009) % 120);
+            std::this_thread::sleep_for(std::chrono::milliseconds(jitter_ms));
+            if (!running_.load()) break;
         }
-    } else {
-        st.ok = false;
+        const int ms = attempt == 0 ? first_ms : retry_ms;
+        auto resp = http_get(url_, ms);
+        if (resp.status >= 200 && resp.status < 300) {
+            auto d = parse_difficulty_body(resp.body);
+            if (d) {
+                st.difficulty = *d;
+                st.ok = true;
+                st.error.clear();
+                break;
+            }
+            st.error = "invalid difficulty body";
+            continue;
+        }
         st.error = resp.error.empty() ? ("HTTP " + std::to_string(resp.status)) : resp.error;
         if (st.error.empty()) st.error = "no response";
     }
+    auto t1 = std::chrono::steady_clock::now();
+    st.latency_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
     // Live GET /difficulty is the only m= oracle. Do not invent m= from leaderboard.
     {
         std::lock_guard<std::mutex> lock(mu_);

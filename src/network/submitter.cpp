@@ -28,15 +28,22 @@ bool submit_accepted(int status, const std::string& body) {
 bool is_difficulty_mismatch(int status, const std::string& body) {
     if (status == 0) return false;
     auto l = lower(body);
+    // Wrong-m= only. Empty 401 is shed (see is_pool_shed) — do not lump them.
     if (l.find("hash does not contain 'm=") != std::string::npos) return true;
     if (l.find("does not contain") != std::string::npos && l.find("m=") != std::string::npos)
         return true;
     if (l.find("memory_cost") != std::string::npos && l.find("does not contain") != std::string::npos)
         return true;
-    // Pool uses HTTP 401 + this text for "won't take this hash now" (wrong live m=,
-    // or a slammed /verify). It is not a broken digest — keep the bag and retry.
-    if (l.find("hash verification failed") != std::string::npos) return true;
     return false;
+}
+
+bool is_pool_shed(int status, const std::string& body) {
+    if (is_difficulty_mismatch(status, body)) return false;
+    if (status != 401 && status != 429) return false;
+    for (unsigned char c : body) {
+        if (!std::isspace(c)) return false;
+    }
+    return true;
 }
 
 bool is_xuni_window_reject(int status, const std::string& body) {
@@ -55,6 +62,7 @@ bool is_transient_submit_failure(int status, const std::string& body) {
 }
 
 bool is_pool_hold(int status, const std::string& body) {
+    if (is_difficulty_mismatch(status, body)) return false;
     if (status == 401 || status == 403 || status == 429) return true;
     auto l = lower(body);
     return l.find("hash verification failed") != std::string::npos;
@@ -73,9 +81,9 @@ std::string submit_response_hint(int status, const std::string& body) {
     if (status >= 200 && status < 300) return "HTTP " + std::to_string(status);
     auto l = lower(body);
     if (l.find("already exists") != std::string::npos) return "already on server (duplicate)";
-    if (status == 401 && body.empty()) return "HTTP 401 empty body";
+    if (is_difficulty_mismatch(status, body)) return "wrong m= — live /difficulty does not match this hash";
+    if (is_pool_shed(status, body)) return "pool shed — empty 401 (server overloaded)";
     if (is_pool_hold(status, body)) return "pool hold — retry (hash kept)";
-    if (is_difficulty_mismatch(status, body)) return "difficulty mismatch — hold for matching m=";
     if (is_xuni_window_reject(status, body)) return "outside XUNI window";
     if (is_transient_submit_failure(status, body)) return "network error";
     std::string snippet = body;

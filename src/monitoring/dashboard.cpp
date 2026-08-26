@@ -410,7 +410,7 @@ void MinerDashboard::render() {
             match = std::string(YELLOW) + "waiting for match" + RST;
         else
             match = "-";
-        row(oss, cell("Difficulty", std::string(WHITE) + netm + RST) + cell("Window", match));
+        row(oss, cell("Net m=", std::string(WHITE) + netm + RST) + cell("Window", match));
         row(oss, cell("CUDA", std::to_string(cuda_lanes_) + " lane" +
                                  (cuda_lanes_ == 1 ? "" : "s") + " x " + fmt_int(cuda_batch_)) +
                      cell("", ""));

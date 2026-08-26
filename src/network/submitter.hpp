@@ -9,6 +9,8 @@ namespace xn {
 
 bool submit_accepted(int status, const std::string& body);
 bool is_difficulty_mismatch(int status, const std::string& body);
+/// HTTP 401/429 with an empty body — server shedding load, not wrong m=.
+bool is_pool_shed(int status, const std::string& body);
 bool is_xuni_window_reject(int status, const std::string& body);
 bool is_transient_submit_failure(int status, const std::string& body);
 bool is_pool_hold(int status, const std::string& body);

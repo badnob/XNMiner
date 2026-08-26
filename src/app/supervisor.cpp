@@ -545,6 +545,7 @@ bool Supervisor::refresh_network(bool blocking, bool replan_engine) {
         if (dashboard_) {
             dashboard_->set_network(true, diff, false);
             if (force_mine_mode()) dashboard_->set_mining_m(forced_mine_m(), true);
+            dashboard_->render();
         }
         // /difficulty is the flush clock. Arm 512-wide /verify as soon as it matches.
         update_match_drain(now_s());
@@ -591,7 +592,10 @@ bool Supervisor::refresh_network(bool blocking, bool replan_engine) {
             std::lock_guard<std::mutex> lock(state_mu_);
             still_ok = network_ok_;
         }
-        if (dashboard_) dashboard_->set_network(still_ok, last_diff, true);
+        if (dashboard_) {
+            dashboard_->set_network(still_ok, last_diff, true);
+            dashboard_->render();
+        }
         if (fail_streak == 1 || fail_streak % 4 == 0) {
             log("warn", "Difficulty poll failed (" +
                             (st.error.empty() ? "timeout" : st.error) +
@@ -604,7 +608,10 @@ bool Supervisor::refresh_network(bool blocking, bool replan_engine) {
         return still_ok;
     }
 
-    if (dashboard_) dashboard_->set_network(false, last_diff, have_last_good);
+    if (dashboard_) {
+        dashboard_->set_network(false, last_diff, have_last_good);
+        dashboard_->render();
+    }
     return false;
 }
 
@@ -832,17 +839,18 @@ void Supervisor::process_live_submit(BlockHit hit, std::string kind) {
         return;
     }
 
-    if (result.status == 0 || is_transient_submit_failure(result.status, result.body)) {
-        note_submit_transport_failure("Live submit", result.status);
-        queue_hit(hit, kind, "network_down", "network back");
+    // Wrong-m= (body has "does not contain m=") is not shed (empty 401).
+    if (is_difficulty_mismatch(result.status, result.body)) {
+        queue_hit(hit, kind, DIFFICULTY_CHANGE_REASON, "difficulty matches");
         return;
     }
     if (is_pool_hold(result.status, result.body)) {
         queue_hit(hit, kind, DIFFICULTY_CHANGE_REASON, "pool takes it");
         return;
     }
-    if (is_difficulty_mismatch(result.status, result.body)) {
-        queue_hit(hit, kind, DIFFICULTY_CHANGE_REASON, "difficulty matches");
+    if (result.status == 0 || is_transient_submit_failure(result.status, result.body)) {
+        note_submit_transport_failure("Live submit", result.status);
+        queue_hit(hit, kind, "network_down", "network back");
         return;
     }
     if (is_xuni_window_reject(result.status, result.body)) {
@@ -966,6 +974,8 @@ int Supervisor::try_flush_pending(const std::string& context, bool on_shutdown) 
     std::atomic<size_t> next{0};
     std::atomic<int> flushed{0};
     std::atomic<int> holds{0};
+    std::atomic<int> sheds{0};
+    std::atomic<int> wrong_m{0};
     std::atomic<int> transients{0};
     std::atomic<int> last_hold_status{0};
     std::atomic<int> done_count{0};
@@ -1005,6 +1015,8 @@ int Supervisor::try_flush_pending(const std::string& context, bool on_shutdown) 
                    is_difficulty_mismatch(result.status, result.body) ||
                    is_xuni_window_reject(result.status, result.body)) {
             holds.fetch_add(1);
+            if (is_difficulty_mismatch(result.status, result.body)) wrong_m.fetch_add(1);
+            else if (is_pool_shed(result.status, result.body)) sheds.fetch_add(1);
             last_hold_status.store(result.status);
             std::lock_guard<std::mutex> lock(acc_mu);
             last_hold_hint = submit_response_hint(result.status, result.body);
@@ -1027,7 +1039,9 @@ int Supervisor::try_flush_pending(const std::string& context, bool on_shutdown) 
                 log("info", "Match-flush brute " + std::to_string(sent) + "/" +
                                 std::to_string(work.size()) + " sent, accepted " +
                                 std::to_string(flushed.load()) + ", hold " +
-                                std::to_string(holds.load()) + ", bag~" +
+                                std::to_string(holds.load()) + " shed " +
+                                std::to_string(sheds.load()) + " wrong-m " +
+                                std::to_string(wrong_m.load()) + ", bag~" +
                                 std::to_string(store_->pending_count()));
             }
         }
@@ -1084,6 +1098,8 @@ int Supervisor::try_flush_pending(const std::string& context, bool on_shutdown) 
 
     const int flushed_n = flushed.load();
     const int holds_n = holds.load();
+    const int shed_n = sheds.load();
+    const int wrong_n = wrong_m.load();
     const int trans_n = transients.load();
     if (flushed_n) {
         if (draining && match_drain_flushed_.load() == flushed_n) {
@@ -1108,7 +1124,8 @@ int Supervisor::try_flush_pending(const std::string& context, bool on_shutdown) 
             last_flush_skip_log_at_ = t;
             log("warn", std::string(draining ? "Match-flush brute" : "Queue flush") +
                             " /verify hold HTTP " + std::to_string(last_hold_status.load()) +
-                            " x" + std::to_string(holds_n) +
+                            " x" + std::to_string(holds_n) + " shed " + std::to_string(shed_n) +
+                            " wrong-m " + std::to_string(wrong_n) +
                             (trans_n ? (" transient x" + std::to_string(trans_n)) : "") + " — " +
                             last_hold_hint + " — rotate past id " +
                             std::to_string(flush_skip_before_id_) + ", keep slamming bag");
