@@ -32,9 +32,12 @@ echo "stopping old processes on $(hostname)"
 pkill -TERM -f /build/bin/xnminer 2>/dev/null || true
 sleep 6
 pkill -KILL -f /build/bin/xnminer 2>/dev/null || true
+pkill -KILL -f 'vast.sh --watch' 2>/dev/null || true
 pkill -KILL -f 'bash vast.sh' 2>/dev/null || true
 pkill -KILL -f /tmp/restart-gpu.sh 2>/dev/null || true
 pkill -KILL -f /tmp/remote-update.sh 2>/dev/null || true
+tmux kill-session -t xnwrap 2>/dev/null || true
+tmux kill-session -t xnminer 2>/dev/null || true
 sleep 2
 
 if [[ -z "${GH_TOKEN:-}" ]]; then
@@ -44,10 +47,15 @@ if [[ -z "${GH_TOKEN:-}" ]]; then
   exit 2
 fi
 git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/badnob/xnminer-low-dif-hybrid-blackwell.git"
-if ! git fetch --depth 1 origin; then
-  echo "ERROR: git fetch failed — token missing or revoked. Do not retry with a username prompt."
-  git remote set-url origin "https://github.com/badnob/xnminer-low-dif-hybrid-blackwell.git"
-  exit 3
+export GIT_TERMINAL_PROMPT=0
+if ! git -c gc.auto=0 fetch --depth 1 origin; then
+  git update-ref -d FETCH_HEAD >/dev/null 2>&1 || true
+  rm -f .git/shallow.lock
+  if ! git -c gc.auto=0 fetch --depth 1 origin; then
+    echo "ERROR: git fetch failed — token missing or revoked. Do not retry with a username prompt."
+    git remote set-url origin "https://github.com/badnob/xnminer-low-dif-hybrid-blackwell.git"
+    exit 3
+  fi
 fi
 git reset --hard origin/main
 git remote set-url origin "https://github.com/badnob/xnminer-low-dif-hybrid-blackwell.git"

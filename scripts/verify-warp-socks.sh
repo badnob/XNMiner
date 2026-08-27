@@ -106,5 +106,4 @@ echo "  VERIFY_PROXY=socks5h://${BIND}"
 if [[ -n "${egress}" ]]; then
   echo "  pool will see ${egress} (Cloudflare), not this box's Vast IP"
 fi
-echo "  test: curl -4 -fsS -x socks5h://${BIND} https://ifconfig.me"
-echo "        curl -4 -fsS https://ifconfig.me    # still Vast — that is correct"
+echo "  SOCKS done — continuing to the miner (not waiting for input)."

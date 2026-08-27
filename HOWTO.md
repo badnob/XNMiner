@@ -13,6 +13,8 @@ bash vast.sh
 
 Use a CUDA **devel** image so `nvcc` exists.
 
+`bash vast.sh` opens the live miner dashboard in that same window. SOCKS setup runs in the background and is not a prompt. After an SSH drop, SSH back in and run `bash vast.sh` again to see the dashboard. Leave without stopping: **Ctrl+B** then **D**.
+
 ## 1. Host packages
 
 ```bash
@@ -63,9 +65,7 @@ Override: `CMAKE_CUDA_ARCHITECTURES=86 ./build.sh`
 
 1. Enter your `0x` wallet when asked (saved to `miner.ini`).
 2. Enter a miner name, or press Enter for `xnminer-xxxxxxxx`.
-3. Watch the live dashboard (H/s, accepts, temp, VRAM, lanes). On Vast the miner runs in tmux:
-   `tmux attach -t xnminer`
-   Detach without stopping: **Ctrl+B** then **D**.
+3. Watch the live dashboard (H/s, accepts, temp, VRAM, lanes). On Vast, `bash vast.sh` opens that dashboard in the same window. Detach without stopping: **Ctrl+B** then **D**. Run `bash vast.sh` again after reconnect.
 4. **Ctrl+C** in the TUI stops mining and bags the queue for the next start.
 
 There is no pre-filled address, worker, Woodyminer name, tracker id, lock, or queue.
@@ -104,6 +104,7 @@ Edit `miner.ini` (created from `miner.ini.example`):
 | Power limit fails | Run as root, or skip `gpu_power_boost_enabled` |
 | Another instance | Close the other miner or delete `data/miner.lock` |
 | Woodyminer HTTPS fails | Confirm `libcurl` is the OpenSSL build (`libcurl4-openssl-dev`) |
+| Window sits on SOCKS / looks stuck | That is the background proxy, not the miner. Run `bash vast.sh` again in that clone folder. Do not type `tmux attach` into the SOCKS text. |
 
 ## Auto-update
 
@@ -123,12 +124,12 @@ This is the “only `/verify` leaves through another IP” path. It does **not**
 verify_warp_socks = true
 ```
 
-`bash vast.sh` starts a userspace Cloudflare WARP SOCKS at `127.0.0.1:40000` and points only `POST /verify` at it. No extra export, no Cloudflare account. Flush stays **512**.
+`bash vast.sh` starts a userspace Cloudflare WARP SOCKS at `127.0.0.1:40000` and points only `POST /verify` at it. No extra export, no Cloudflare account. Flush stays **512**. SOCKS logs stay in the background (`data/wrapper.log`); this window should become the miner dashboard.
 
 To disable without rebooting the Vast machine: set `verify_warp_socks = false` in `miner.ini` and save. The miner sees the file change, bags the queue, and `vast.sh` restarts it — the same path as auto-update. Wait about 10 seconds, then open the dashboard:
 
 ```bash
-tmux attach -t xnminer
+cd /workspace/xnminer-low-dif-hybrid-blackwell && bash vast.sh
 ```
 
 Leave without stopping: **Ctrl+B**, then **D**.

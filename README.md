@@ -91,19 +91,21 @@ bash vast.sh
 
 Optional: `export WORKER=27605` (many people use the Vast SSH port as the name).
 
-### See the dashboard (after start, after a restart, after an update)
+`bash vast.sh` **is** the dashboard. SOCKS and auto-update run in the background. That window should switch to the live miner (hashrate, temps, wallet). It is not stuck on SOCKS.
 
-SSH into the box, then type this and press Enter:
+### See the dashboard (after start, after SSH drop, after an update)
+
+SSH back in and run the same start command:
 
 ```bash
-tmux attach -t xnminer
+cd /workspace/xnminer-low-dif-hybrid-blackwell && bash vast.sh
 ```
 
-That is the live miner screen. Use it any time the miner restarts itself.
+If mining is already going, that only opens the live screen. Do not type `tmux attach` into a window that is still printing SOCKS text.
 
 To leave the screen **without stopping the miner:** press **Ctrl+B**, then tap **D**.
 
-If it says `no session`, wait 10 seconds and run the same command again. Do not reboot.
+Do not reboot.
 
 Windows bag vault (Vast disks vanish): `BAG_FORWARD_URL` / `BAG_FORWARD_TOKEN` — see `HOWTO.md`. The box still flushes locally; Windows is the spare bag.
 
@@ -111,9 +113,9 @@ Windows bag vault (Vast disks vanish): `BAG_FORWARD_URL` / `BAG_FORWARD_TOKEN` �
 
 ```bash
 # stop
-pkill -9 -f '/build/bin/xnminer'; pkill -9 -f 'bash vast.sh'
+pkill -9 -f '/build/bin/xnminer'; pkill -9 -f 'vast.sh'; tmux kill-session -t xnminer 2>/dev/null; tmux kill-session -t xnwrap 2>/dev/null
 
-# start
+# start (also re-opens the dashboard if it is already mining)
 cd /workspace/xnminer-low-dif-hybrid-blackwell && bash vast.sh
 
 # pull main, rebuild, start (does not reboot the Vast instance)
@@ -157,10 +159,10 @@ verify_warp_socks = false
 4. Open the dashboard again:
 
 ```bash
-tmux attach -t xnminer
+cd /workspace/xnminer-low-dif-hybrid-blackwell && bash vast.sh
 ```
 
-If a match-flush is in progress, it finishes that window first, then restarts. If attach fails, wait a few more seconds and run it once more.
+If a match-flush is in progress, it finishes that window first, then restarts. If the live screen does not appear, wait a few seconds and run that command once more.
 
 Confirm in `data/session.log`:
 
@@ -221,7 +223,7 @@ Empty detect → multi-arch cubin `75;86;89;90;120`. Pascal / 10-series will not
 ```text
 src/                 C++ host (supervisor, CUDA engine, /verify, TUI)
 vendor/              CUDA Argon2id kernels (champ / work-patch)
-vast.sh              Vast entry — detect, build, TUI, auto-update, WARP SOCKS
+vast.sh              Vast entry — build, open dashboard, background SOCKS + auto-update
 build.sh             cmake + nvcc for this GPU
 scripts/detect-hardware.sh
 scripts/verify-warp-socks.sh    userspace SOCKS, no default route
