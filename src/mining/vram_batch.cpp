@@ -38,7 +38,8 @@ double bytes_per_attempt(int difficulty) {
 }
 
 int suggested_max_lanes(int total_vram_mib) {
-    // ~3.5 GiB per lane at m=100 / 80% VRAM. Works for 4 GB laptops through 32 GB 5090s.
+    // Fixed VRAM layout. ~3.5 GiB/lane was sized at m=100; hybrid m=10000 keeps
+    // the same lane count and fills each lane with fewer hashes.
     if (total_vram_mib >= 28000) return 8;
     if (total_vram_mib >= 22000) return 6;
     if (total_vram_mib >= 16000) return 4;
@@ -48,12 +49,12 @@ int suggested_max_lanes(int total_vram_mib) {
     return 1;
 }
 
-int cuda_lane_count(int difficulty, int reference_difficulty, int max_lanes) {
-    if (max_lanes <= 1 || reference_difficulty <= 0 || difficulty <= 0) return 1;
-    if (difficulty >= reference_difficulty) return 1;
-    int boost = reference_difficulty / difficulty;
-    // Full multi-lane harvest when difficulty drops (e.g. m=100 → up to max_lanes).
-    return std::max(1, std::min(max_lanes, boost));
+int cuda_lane_count(int /*difficulty*/, int /*reference_difficulty*/, int max_lanes) {
+    // Lane count is a VRAM layout, not a difficulty boost. Hybrid m=10000 still
+    // uses 8/6/4/2 lanes on 32/24/16/8 GB — batch per lane shrinks instead.
+    // The old gate (difficulty >= reference → 1 lane) collapsed 32 GB boxes to
+    // 1-wide as soon as force-mine left m=100.
+    return std::max(1, std::min(8, max_lanes));
 }
 
 uint64_t estimate_batch_vram_bytes(int batch_size, int difficulty) {
@@ -121,12 +122,7 @@ static CudaVramPlan clamp_plan_to_caps(CudaVramPlan plan) {
             batch_per_lane = std::max(1, static_cast<int>(batch_per_lane * 0.98));
             continue;
         }
-        if (lanes > 1) {
-            --lanes;
-            uint64_t per_lane_budget = std::max<uint64_t>(1, plan.budget_bytes / lanes);
-            batch_per_lane = select_batch_size(per_lane_budget, plan.difficulty, 0, true);
-            continue;
-        }
+        // Keep the VRAM lane layout. Do not collapse 8-wide to 1 when m= is high.
         break;
     }
     return plan;

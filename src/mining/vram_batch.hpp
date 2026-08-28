@@ -33,7 +33,8 @@ struct CudaVramPlan {
 
 double bytes_per_attempt(int difficulty);
 int cuda_lane_count(int difficulty, int reference_difficulty, int max_lanes);
-// How many hunt lanes this card's VRAM can hold at m=100 (1..8). 8GB→2, 16GB→4, 32GB→8.
+// Hunt lanes from this card's total VRAM (1..8). 8GB→2, 16GB→4, 24GB→6, 32GB→8.
+// Independent of Argon2 m= — high hybrid m= shrinks batch, not lane count.
 int suggested_max_lanes(int total_vram_mib);
 uint64_t estimate_batch_vram_bytes(int batch_size, int difficulty);
 int memory_limited_batch_size(uint64_t free_vram_bytes, int difficulty,
