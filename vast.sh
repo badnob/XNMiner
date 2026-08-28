@@ -320,6 +320,7 @@ apply_ini_env() {
       }
     }
     /^xuni_mining_enabled[[:space:]]*=/ { print "xuni_mining_enabled = false"; next }
+    /^force_mine_memory_cost[[:space:]]*=/ { print "force_mine_memory_cost = 10000"; fm=1; next }
     /^match_drain_parallel[[:space:]]*=/ {
       if (mpar != "") { print "match_drain_parallel = " mpar; next }
     }
@@ -362,6 +363,7 @@ apply_ini_env() {
     END {
       if (!se) print "submit_enabled = " suben
       if (!md) print "match_drain_enabled = true"
+      if (!fm) print "force_mine_memory_cost = 10000"
       if (vproxy != "" && !vp) print "verify_proxy = " vproxy
       if (!vw) print "verify_warp_socks = true"
     }

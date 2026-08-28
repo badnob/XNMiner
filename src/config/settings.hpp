@@ -27,9 +27,9 @@ struct Settings {
     int parallelism = 1;
     int hash_len = 64;
 
-    // Hybrid / force-mine: if > 0, CUDA always uses this Argon2 m= (e.g. 100 for max H/s).
+    // Hybrid / force-mine: if > 0, CUDA always uses this Argon2 m= (e.g. 10000).
     // 0 = classic mode (mine whatever the network reports).
-    int force_mine_memory_cost = 100;
+    int force_mine_memory_cost = 10000;
 
     // POST /verify when live m= matches the bag. Default on so a git update
     // enables flush without a missing-key bag-only fallback.

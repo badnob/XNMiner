@@ -361,10 +361,9 @@ void MinerDashboard::render() {
     if (flushing) {
         // "FLUSH 15/16 in flight · cleared 1188 (new 1171) · bag 92021"
         std::string rest = status_.size() > 6 ? status_.substr(6) : status_;
-        std::string inflight, cleared, bag;
+        std::string cleared, bag;
         auto cut = rest.find(" · ");
         if (cut != std::string::npos) {
-            inflight = rest.substr(0, cut);
             rest = rest.substr(cut + 3);
             cut = rest.find(" · ");
             if (cut != std::string::npos) {
@@ -373,11 +372,7 @@ void MinerDashboard::render() {
             } else {
                 cleared = rest;
             }
-        } else {
-            inflight = rest;
         }
-        if (!inflight.empty())
-            row(oss, cell("In flight", std::string(YELLOW) + inflight + RST));
         if (!cleared.empty()) row(oss, cell("Cleared", cleared));
         if (!bag.empty()) row(oss, cell("Bag", bag));
     }
