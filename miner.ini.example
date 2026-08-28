@@ -41,7 +41,7 @@ hash_len = 64
 # Always mine at this memory cost on the GPU.
 # 100 = fastest hashrate. Finds sit in the queue until live m= matches, then /verify.
 # 0 = follow whatever the network is doing (slower when the network is hard).
-force_mine_memory_cost = 100
+force_mine_memory_cost = 10000
 # Credit is POST /verify (not send_pow). false = bag-only, desktop submits.
 submit_enabled = true
 # CPU-flush when live /difficulty matches bag m=.
