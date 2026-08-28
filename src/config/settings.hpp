@@ -5,6 +5,12 @@
 
 namespace xn {
 
+// Hybrid pin. Live Vast miner.ini still has the retired default (100); that
+// value is rewritten to this on load so an old in-memory vast.sh cannot keep
+// boxes hashing at 100 after a git update.
+inline constexpr int kHybridForceMineMemoryCost = 10000;
+inline constexpr int kLegacyHybridForceMineMemoryCost = 100;
+
 struct Settings {
     std::string address;
     std::string worker;
@@ -27,9 +33,9 @@ struct Settings {
     int parallelism = 1;
     int hash_len = 64;
 
-    // Hybrid / force-mine: if > 0, CUDA always uses this Argon2 m= (e.g. 10000).
+    // Hybrid / force-mine: if > 0, CUDA always uses this Argon2 m= (10000).
     // 0 = classic mode (mine whatever the network reports).
-    int force_mine_memory_cost = 10000;
+    int force_mine_memory_cost = kHybridForceMineMemoryCost;
 
     // POST /verify when live m= matches the bag. Default on so a git update
     // enables flush without a missing-key bag-only fallback.

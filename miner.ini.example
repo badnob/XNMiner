@@ -40,6 +40,7 @@ parallelism = 1
 hash_len = 64
 # Always mine at this memory cost on the GPU.
 # Finds sit in the queue until live m= matches, then /verify.
+# 10000 = current hybrid pin. 100 is the retired default and is rewritten to 10000.
 # 0 = follow whatever the network is doing (slower when the network is hard).
 force_mine_memory_cost = 10000
 # Credit is POST /verify (not send_pow). false = bag-only, desktop submits.

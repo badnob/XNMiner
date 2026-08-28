@@ -281,9 +281,31 @@ Settings load_settings(const std::filesystem::path& ini_path) {
     s.time_cost = get_i(ini, "mining", "time_cost", s.time_cost);
     s.parallelism = get_i(ini, "mining", "parallelism", s.parallelism);
     s.hash_len = get_i(ini, "mining", "hash_len", s.hash_len);
-    s.force_mine_memory_cost =
+    const int from_ini =
         get_i(ini, "mining", "force_mine_memory_cost", s.force_mine_memory_cost);
+    s.force_mine_memory_cost = from_ini;
+    {
+        const char* env_fm = std::getenv("FORCE_MINE_MEMORY_COST");
+        if (!env_fm || !*env_fm) env_fm = std::getenv("XN_FORCE_MINE_MEMORY_COST");
+        if (env_fm && *env_fm) {
+            try {
+                const int v = std::stoi(trim(env_fm));
+                if (v >= 0) s.force_mine_memory_cost = v;
+            } catch (...) {
+            }
+        }
+    }
     if (s.force_mine_memory_cost < 0) s.force_mine_memory_cost = 0;
+    // Retired hybrid default. Vast auto-update rebuilds the binary but keeps
+    // the previous vast.sh --watch functions in memory, so apply_ini_env never
+    // rewrites miner.ini and CUDA stays at m=100. The new binary must pin it.
+    if (s.force_mine_memory_cost == kLegacyHybridForceMineMemoryCost) {
+        s.force_mine_memory_cost = kHybridForceMineMemoryCost;
+    }
+    if (s.force_mine_memory_cost != from_ini) {
+        set_ini_value(ini_path, "mining", "force_mine_memory_cost",
+                      std::to_string(s.force_mine_memory_cost));
+    }
     s.submit_enabled = get_b(ini, "mining", "submit_enabled", true);
     s.match_drain_enabled = get_b(ini, "mining", "match_drain_enabled", true);
     if (!s.submit_enabled) s.match_drain_enabled = false;

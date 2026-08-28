@@ -417,7 +417,6 @@ void Supervisor::log_flush_skip(const std::string& why) {
 void Supervisor::maybe_check_update(double now) {
     if (!settings_.update_check_enabled) return;
     if (shutting_down_ || update_requested_) return;
-    if (match_drain_active()) return;
     if (last_update_check_ <= 0) {
         last_update_check_ = now;  // first check after one full interval
         return;
@@ -444,8 +443,9 @@ void Supervisor::maybe_check_update(double now) {
 
 void Supervisor::maybe_reload_config(double now) {
     // Same bag-and-exit path as GitHub auto-update. vast.sh brings the process back.
+    // Do not skip during match-drain: live net m= is often 100, so a flush window
+    // would hide miner.ini / git pins forever.
     if (shutting_down_ || update_requested_) return;
-    if (match_drain_active()) return;
     if (now - last_config_check_ < 4.0) return;
     last_config_check_ = now;
 
@@ -1497,6 +1497,13 @@ void Supervisor::run(std::optional<int> max_seconds) {
                                  ? (" (match_flush max " +
                                     std::to_string(settings_.match_drain_max_s) + "s)")
                                  : " (until bag empty or live diff leaves)"));
+        }
+        {
+            std::error_code ec;
+            const auto stamp = settings_.root / "data" / "running_mine_m";
+            std::filesystem::create_directories(stamp.parent_path(), ec);
+            std::ofstream o(stamp, std::ios::trunc);
+            if (o) o << forced_mine_m() << "\n";
         }
         if (dashboard_) {
             dashboard_->set_mining_m(forced_mine_m(), true);

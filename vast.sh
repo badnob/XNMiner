@@ -45,6 +45,9 @@ VERIFY_PROXY="${VERIFY_PROXY:-}"
 SUBMIT_ENABLED="${SUBMIT_ENABLED:-true}"
 # Empty = follow miner.ini verify_warp_socks (default true). 0/1 overrides the file.
 WARP_SOCKS="${WARP_SOCKS:-}"
+# Hybrid CUDA m=. Old miner.ini still says 100; pin here so a new binary/env wins
+# even when the in-memory vast.sh --watch apply_ini_env is from the previous commit.
+export FORCE_MINE_MEMORY_COST="${FORCE_MINE_MEMORY_COST:-10000}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "${HERE}/CMakeLists.txt" && -f "${HERE}/miner.ini.example" ]]; then
@@ -150,6 +153,58 @@ wrap_alive() {
   tmux has-session -t xnwrap 2>/dev/null && pgrep -f 'vast.sh --watch' >/dev/null 2>&1
 }
 
+ini_force_mine_m() {
+  awk -F= '/^[[:space:]]*force_mine_memory_cost[[:space:]]*=/{v=$2; gsub(/[ \t\r]/,"",v); print v; exit}' \
+    "${ROOT}/miner.ini" 2>/dev/null || true
+}
+
+running_mine_m() {
+  tr -d ' \r\n' < "${ROOT}/data/running_mine_m" 2>/dev/null || true
+}
+
+session_mine_m() {
+  # Last "CUDA mine m=N fixed" line in session.log.
+  awk '/CUDA mine m=[0-9]+ fixed/{m=$0} END{
+    if (m ~ /CUDA mine m=([0-9]+) fixed/) {
+      sub(/.*CUDA mine m=/, "", m)
+      sub(/ fixed.*/, "", m)
+      print m
+    }
+  }' "${ROOT}/data/session.log" 2>/dev/null || true
+}
+
+stop_miner_process() {
+  pkill -TERM -x xnminer 2>/dev/null || true
+  local i=0
+  while [[ "${i}" -lt 20 ]] && pgrep -x xnminer >/dev/null 2>&1; do
+    sleep 1
+    i=$((i + 1))
+  done
+  pkill -KILL -x xnminer 2>/dev/null || true
+}
+
+# Restart a live miner when it is still hashing the retired hybrid m=100.
+bounce_miner_if_wrong_m() {
+  local want="${FORCE_MINE_MEMORY_COST:-10000}"
+  local have ini logged seen
+  have="$(running_mine_m)"
+  ini="$(ini_force_mine_m)"
+  logged="$(session_mine_m)"
+  seen="${have:-${logged}}"
+  if ! miner_alive && ! pgrep -x xnminer >/dev/null 2>&1; then
+    return 0
+  fi
+  if [[ "${seen}" == "${want}" && "${ini}" == "${want}" ]]; then
+    return 0
+  fi
+  # No stamp/log yet (just started) and ini already pinned — do not loop.
+  if [[ -z "${seen}" && "${ini}" == "${want}" ]]; then
+    return 0
+  fi
+  echo "Hybrid mine m= process=${have:-unknown} log=${logged:-unknown} ini=${ini:-unknown} want=${want} — bouncing miner"
+  stop_miner_process
+}
+
 show_miner_screen() {
   echo
   echo "Opening the miner dashboard in this window."
@@ -210,6 +265,7 @@ start_wrap() {
     printf 'export WARP_SOCKS=%q\n' "${WARP_SOCKS:-}"
     printf 'export MATCH_DRAIN_PARALLEL=%q\n' "${MATCH_DRAIN_PARALLEL:-}"
     printf 'export MATCH_DRAIN_BATCH=%q\n' "${MATCH_DRAIN_BATCH:-}"
+    printf 'export FORCE_MINE_MEMORY_COST=%q\n' "${FORCE_MINE_MEMORY_COST:-10000}"
   } > "${envf}"
   tmux new-session -d -s xnwrap -n wrap \
     "set -a; . '${envf}'; set +a; cd '${ROOT}'; exec bash '${ROOT}/vast.sh' --watch"
@@ -320,7 +376,7 @@ apply_ini_env() {
       }
     }
     /^xuni_mining_enabled[[:space:]]*=/ { print "xuni_mining_enabled = false"; next }
-    /^force_mine_memory_cost[[:space:]]*=/ { print "force_mine_memory_cost = 10000"; fm=1; next }
+    /^[[:space:]]*force_mine_memory_cost[[:space:]]*=/ { print "force_mine_memory_cost = 10000"; fm=1; next }
     /^match_drain_parallel[[:space:]]*=/ {
       if (mpar != "") { print "match_drain_parallel = " mpar; next }
     }
@@ -416,6 +472,12 @@ apply_git_update() {
   ./build.sh
   write_build_sha
   apply_ini_env
+  # Running --watch still has the *previous* bash functions. Re-exec so the
+  # new pin / bounce logic actually runs after this git update.
+  if [[ "${WATCH}" -eq 1 ]]; then
+    echo "re-exec watch with updated vast.sh"
+    exec bash "${ROOT}/vast.sh" --watch
+  fi
   return 0
 }
 
@@ -475,6 +537,7 @@ if [[ "${WATCH}" -eq 1 ]]; then
   ensure_worker_name
   MATCH_DRAIN_PARALLEL="${MATCH_DRAIN_PARALLEL:-}"
   MATCH_DRAIN_BATCH="${MATCH_DRAIN_BATCH:-}"
+  FORCE_MINE_MEMORY_COST="${FORCE_MINE_MEMORY_COST:-10000}"
   if [[ ! -x "${ROOT}/build/bin/xnminer" ]]; then
     echo "Building for this GPU / CPU / VRAM..."
     ./build.sh
@@ -489,6 +552,7 @@ if [[ "${WATCH}" -eq 1 ]]; then
     echo "watch: ensuring WARP SOCKS..."
     setup_verify_warp
     apply_ini_env
+    bounce_miner_if_wrong_m
     miner_pid="$(pgrep -x xnminer | head -n1 || true)"
     if [[ -z "${miner_pid}" ]] || ! tmux has-session -t xnminer 2>/dev/null; then
       echo "watch: launching miner dashboard session"
@@ -506,13 +570,19 @@ if [[ "${WATCH}" -eq 1 ]]; then
     echo "watch: miner pid=${miner_pid}  dashboard session=xnminer"
     (
       while kill -0 "${miner_pid}" 2>/dev/null; do
-        sleep 300
+        sleep 60
         remote="$(github_remote_sha || true)"
         remote="${remote//$'\r'/}"
         remote="${remote//$'\n'/}"
         local_sha="$(tr -d ' \r\n' < data/build_sha 2>/dev/null || git rev-parse HEAD 2>/dev/null || true)"
         if [[ -n "${remote}" && -n "${local_sha}" && "${remote}" != "${local_sha}" ]]; then
           echo "wrapper saw GitHub ${remote:0:8} (have ${local_sha:0:8}) — signaling miner to bag and exit"
+          kill -TERM "${miner_pid}" 2>/dev/null || true
+          break
+        fi
+        have_m="$(tr -d ' \r\n' < data/running_mine_m 2>/dev/null || true)"
+        if [[ -n "${have_m}" && "${have_m}" != "${FORCE_MINE_MEMORY_COST:-10000}" ]]; then
+          echo "wrapper saw running mine m=${have_m} (want ${FORCE_MINE_MEMORY_COST:-10000}) — restarting"
           kill -TERM "${miner_pid}" 2>/dev/null || true
           break
         fi
@@ -551,6 +621,30 @@ cd "${ROOT}" 2>/dev/null || true
 load_ini_identity
 
 if miner_alive; then
+  want_m="${FORCE_MINE_MEMORY_COST:-10000}"
+  before_m="$(ini_force_mine_m)"
+  apply_ini_env
+  have_m="$(running_mine_m)"
+  after_m="$(ini_force_mine_m)"
+  logged_m="$(session_mine_m)"
+  seen_m="${have_m:-${logged_m}}"
+  need_bounce=0
+  if [[ "${before_m}" != "${want_m}" || "${after_m}" != "${want_m}" ]]; then
+    need_bounce=1
+  fi
+  if [[ -n "${seen_m}" && "${seen_m}" != "${want_m}" ]]; then
+    need_bounce=1
+  fi
+  if [[ "${need_bounce}" -eq 1 ]]; then
+    echo "Miner is up at m=${have_m:-unknown} (ini ${before_m:-?} -> ${after_m:-?}) — bouncing to m=${want_m}."
+    stop_miner_process
+    if ! wrap_alive; then
+      start_wrap
+    fi
+    wait_for_miner_screen
+    show_miner_screen
+    exit 0
+  fi
   if ! wrap_alive; then
     echo "Miner is up but the restarter was not — starting it in the background."
     start_wrap
