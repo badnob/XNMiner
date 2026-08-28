@@ -196,19 +196,21 @@ int Supervisor::mining_difficulty() const {
 
 bool Supervisor::live_submit_allowed() const {
     if (bag_only()) return false;
-    // Mining always continues. Live HTTP submit is optional when pool is unreachable.
+    // Mining always continues. POST /verify is independent of GET /difficulty:
+    // hybrid last-good m= matching the force-mine pin is enough when Net is DOWN.
     std::lock_guard<std::mutex> lock(state_mu_);
-    if (!network_ok_) return false;
     const double t = now_s();
     if (t < submit_backoff_until_) return false;
     // In hybrid mode we do NOT defer submits just because network m= moved — mining m= is fixed.
     if (!force_mine_mode() && t < defer_submit_until_) return false;
-    return true;
+    if (network_ok_) return true;
+    return force_mine_mode() && network_difficulty_ && *network_difficulty_ == forced_mine_m();
 }
 
 bool Supervisor::flush_submit_allowed() const {
     if (bag_only()) return false;
-    // Queue flush follows live /difficulty only. Match-drain ignores 401/timeout backoff.
+    // Queue flush: live ONLINE /difficulty, or hybrid last-good m= == force-mine pin
+    // (GET /difficulty DOWN/STALE must not freeze POST /verify).
     std::lock_guard<std::mutex> lock(state_mu_);
     const double t = now_s();
     const bool draining = match_drain_active_.load();
@@ -224,8 +226,12 @@ bool Supervisor::flush_submit_allowed() const {
 bool Supervisor::oracle_says_m(int m) const {
     if (m <= 0) return false;
     std::lock_guard<std::mutex> lock(state_mu_);
-    // Open the flush only on a live ONLINE /difficulty match, not last-good STALE/DOWN.
-    return network_ok_ && !difficulty_stale_ && network_difficulty_ && *network_difficulty_ == m;
+    if (!(network_difficulty_ && *network_difficulty_ == m)) return false;
+    // Live ONLINE /difficulty match.
+    if (network_ok_ && !difficulty_stale_) return true;
+    // Hybrid: last-good Net m= matching the force-mine pin is enough for /verify
+    // even when GET /difficulty is DOWN or STALE. Wrong-m= from the pool is a hold.
+    return force_mine_mode() && *network_difficulty_ == forced_mine_m();
 }
 
 bool Supervisor::oracle_left_m(int m) const {
@@ -239,8 +245,8 @@ int Supervisor::submit_target_m() const {
     const int bag = bag_target_m();
     if (oracle_says_m(bag)) return bag;
     std::lock_guard<std::mutex> lock(state_mu_);
-    if (network_ok_ && network_difficulty_ && *network_difficulty_ > 0) return *network_difficulty_;
-    return network_difficulty_.value_or(0);
+    if (network_difficulty_ && *network_difficulty_ > 0) return *network_difficulty_;
+    return 0;
 }
 
 bool Supervisor::network_matches_hit_m(int hit_m) const { return oracle_says_m(hit_m); }
@@ -286,7 +292,8 @@ void Supervisor::push_flush_status(int inflight, int pool, int bag_q) {
 }
 
 void Supervisor::update_match_drain(double now) {
-    // CPU flush while live /difficulty matches bag m=. Paper does not open or hold the window.
+    // CPU flush while live or last-good /difficulty matches bag m=.
+    // GET /difficulty DOWN does not close or block the window when last-good equals the pin.
     if (bag_only() || !settings_.match_drain_enabled) {
         if (match_drain_active_) {
             match_drain_active_ = false;
@@ -298,9 +305,11 @@ void Supervisor::update_match_drain(double now) {
     }
 
     int net_m = 0;
+    bool net_live = false;
     {
         std::lock_guard<std::mutex> lock(state_mu_);
         net_m = network_difficulty_.value_or(0);
+        net_live = network_ok_ && !difficulty_stale_;
     }
     const int bag_m = bag_target_m();
     const bool last_good_matches = oracle_says_m(bag_m);
@@ -351,8 +360,9 @@ void Supervisor::update_match_drain(double now) {
         flush_skip_before_id_ = 0;
         const bool park = should_park_cuda();
         log("info", "Match-flush START — bag m=" + std::to_string(bag_m) +
-                        " (live /difficulty m=" + std::to_string(net_m) +
-                        ") q=" + std::to_string(match_q) +
+                        (net_live ? " (live /difficulty m=" : " (last-good m=") +
+                        std::to_string(net_m) + (net_live ? ")" : ", Net DOWN/STALE — still POST /verify)") +
+                        " q=" + std::to_string(match_q) +
                         " brute parallel=" +
                         std::to_string(brute_drain_parallel(settings_.match_drain_parallel, match_q)) +
                         (park ? " — parking CUDA, CPU drains /verify"
@@ -882,8 +892,8 @@ int Supervisor::try_flush_pending(const std::string& context, bool on_shutdown) 
         std::lock_guard<std::mutex> lock(state_mu_);
         if (now_s() < defer_submit_until_) return 0;
     }
-    // During an open /difficulty match window, last-good m= is enough — a flaky
-    // GET must not skip the 512-wide /verify wave.
+    // Hybrid last-good m= matching the force-mine pin is enough for POST /verify
+    // even when GET /difficulty is DOWN. A flaky GET must not skip the wave.
     if (!draining) {
         const bool refreshed = refresh_network(on_shutdown, /*replan_engine=*/false);
         if (!refreshed) {
@@ -1159,7 +1169,7 @@ void Supervisor::service_pending_queue(double now) {
         was_in_xuni_window_ = false;
     }
 
-    // Match-flush: 512 overlapping /verify as soon as live /difficulty matches bag m=.
+    // Match-flush: 512 overlapping /verify when live or last-good /difficulty matches bag m=.
     const bool draining = match_drain_active_.load() || oracle_says_m(bag_target_m());
     double flush_every = pending_total > 500 ? 1.0 : (pending_total > 50 ? 2.0 : 5.0);
     if (draining) flush_every = 0.0;

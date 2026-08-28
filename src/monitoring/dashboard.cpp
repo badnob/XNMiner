@@ -409,9 +409,11 @@ void MinerDashboard::render() {
             netm = std::string(WHITE) + netm + RST;
         }
         std::string match;
-        if (force_hybrid_ && live && difficulty_ && *difficulty_ == mining_m_)
+        if (force_hybrid_ && difficulty_ && *difficulty_ == mining_m_) {
             match = std::string(GREEN) + "MATCH" + RST;
-        else if (difficulty_)
+            if (!live)
+                match += std::string(DIM) + " last-good" + RST;
+        } else if (difficulty_)
             match = std::string(YELLOW) + "waiting for match" + RST;
         else
             match = "-";

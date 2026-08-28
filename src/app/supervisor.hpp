@@ -86,7 +86,7 @@ private:
     int bag_target_m() const;
     /// How many disk-queue hits can submit at current network m=.
     int matching_queue_depth() const;
-    /// Enter/exit aggressive HTTP flush when live /difficulty equals bag m=.
+    /// Enter/exit aggressive HTTP flush when live or last-good /difficulty equals bag m=.
     void update_match_drain(double now);
     bool match_drain_active() const;
     /// Park CUDA when live /difficulty is bag m=.
@@ -143,7 +143,7 @@ private:
     bool finalized_ = false;
     std::optional<VramCaps> vram_caps_;
 
-    // Match-drain: CPU flushes while live /difficulty equals bag m=.
+    // Match-drain: CPU flushes while live or last-good /difficulty equals bag m=.
     std::atomic<bool> match_drain_active_{false};
     bool match_drain_gpu_parked_ = false;
     double match_drain_until_ = 0;
@@ -163,7 +163,7 @@ private:
     std::atomic<bool> submit_worker_running_{false};
 
     bool live_submit_allowed() const;
-    /// Queue flush gate: live /difficulty (or last-good) is enough.
+    /// Queue flush gate: live /difficulty, or hybrid last-good m= == force-mine pin.
     bool flush_submit_allowed() const;
     bool network_matches_hit_m(int hit_m) const;
     bool can_submit_hit_m(int hit_m) const;
