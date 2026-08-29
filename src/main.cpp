@@ -1,6 +1,7 @@
 #include "app/supervisor.hpp"
 #include "common.hpp"
 #include "config/settings.hpp"
+#include "mining/gpu_test.hpp"
 #include "util/hardware.hpp"
 
 #include <cuda_runtime.h>
@@ -55,6 +56,7 @@ int main(int argc, char** argv) {
     std::filesystem::path config;
     bool no_dashboard = false;
     bool diagnose = false;
+    bool gpu_test = false;
     std::optional<int> max_seconds;
 
     for (int i = 1; i < argc; ++i) {
@@ -65,13 +67,17 @@ int main(int argc, char** argv) {
             no_dashboard = true;
         } else if (a == "--diagnose") {
             diagnose = true;
+        } else if (a == "--gpu-test" || a == "--hw-test") {
+            gpu_test = true;
         } else if (a == "--max-seconds" && i + 1 < argc) {
             max_seconds = std::stoi(argv[++i]);
         } else if (a == "--help" || a == "-h") {
             std::cout
                 << xn::kAppName << "\n"
                 << "Usage: xnminer [--config miner.ini] [--no-dashboard] [--diagnose] "
-                   "[--max-seconds N]\n";
+                   "[--gpu-test] [--max-seconds N]\n"
+                << "  --gpu-test     sweep GPU lane split and batch size at force-mine m=\n"
+                << "  --max-seconds  mine cap, or seconds per trial with --gpu-test\n";
             return 0;
         }
     }
@@ -84,10 +90,8 @@ int main(int argc, char** argv) {
         root = std::filesystem::path(module_path).parent_path();
         auto candidate = root;
         if (!std::filesystem::exists(candidate / "miner.ini") &&
-            !std::filesystem::exists(candidate / "miner.ini.example")) {
-            if (std::filesystem::exists(root / ".." / ".." / "miner.ini.example")) {
-                candidate = (root / ".." / "..").lexically_normal();
-            }
+            std::filesystem::exists(root / ".." / ".." / "miner.ini")) {
+            candidate = (root / ".." / "..").lexically_normal();
         }
         root = candidate;
     }
@@ -99,10 +103,8 @@ int main(int argc, char** argv) {
         root = std::filesystem::path(module_path).parent_path();
         auto candidate = root;
         if (!std::filesystem::exists(candidate / "miner.ini") &&
-            !std::filesystem::exists(candidate / "miner.ini.example")) {
-            if (std::filesystem::exists(root / ".." / ".." / "miner.ini.example")) {
-                candidate = (root / ".." / "..").lexically_normal();
-            }
+            std::filesystem::exists(root / ".." / ".." / "miner.ini")) {
+            candidate = (root / ".." / "..").lexically_normal();
         }
         root = candidate;
     }
@@ -114,15 +116,10 @@ int main(int argc, char** argv) {
     std::error_code ec;
     std::filesystem::current_path(config.parent_path(), ec);
 
-    if (!diagnose) {
+    if (!diagnose && !gpu_test) {
         if (!xn::ensure_wallet_configured(config, true)) {
             std::cerr << "Wallet setup required. Edit miner.ini or re-run interactively.\n";
             return 1;
-        }
-    } else if (!std::filesystem::exists(config)) {
-        auto example = config.parent_path() / "miner.ini.example";
-        if (std::filesystem::exists(example)) {
-            std::filesystem::copy_file(example, config);
         }
     }
 
@@ -153,6 +150,11 @@ int main(int argc, char** argv) {
         std::cerr << "ERROR: " << hw.gpu_name << " sm_" << hw.sm_arch
                   << " is older than Turing (sm_75). This miner will not run.\n";
         return 1;
+    }
+
+    if (gpu_test) {
+        const int per = max_seconds.value_or(15);
+        return xn::run_gpu_hardware_test(settings, per);
     }
 
     if (diagnose) {
@@ -198,7 +200,6 @@ int main(int argc, char** argv) {
 
     std::cout << xn::kAppName << " " << xn::kMinerVersion << "\n";
     supervisor.run(max_seconds);
-    const bool want_update = supervisor.update_requested();
     g_supervisor = nullptr;
-    return want_update ? xn::kExitCodeUpdate : 0;
+    return 0;
 }

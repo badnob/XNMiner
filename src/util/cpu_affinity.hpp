@@ -11,7 +11,7 @@ enum class Role { Bag, Flush, Dashboard, CudaHost, Keygen };
 // Split CPUs from physical cores (not SMT threads).
 // Dedicated miner (desktop_cores=0, 8+ physical): bag 2, flush 2, dashboard 2,
 // CUDA host = last 2 physical cores. Keygen uses the first 6 — not the CUDA
-// host slice — matching the Windows desktop 9950X3D layout on a Vast 8-core.
+// host slice.
 void init_layout(int desktop_cores, int bag_cores, int flush_cores, int dashboard_cores);
 
 void pin_this_thread(Role role);

@@ -16,9 +16,4 @@ else
   fi
 fi
 
-if [[ ! -f "${ROOT}/miner.ini" ]]; then
-  cp "${ROOT}/miner.ini.example" "${ROOT}/miner.ini"
-  echo "Created miner.ini from miner.ini.example (empty wallet — first run will prompt)."
-fi
-
 exec "${BIN}" "$@"

@@ -12,10 +12,8 @@
 #include "monitoring/wallet.hpp"
 #include "monitoring/woodyminer.hpp"
 #include "monitoring/xenblockscan.hpp"
-#include "network/bag_forward.hpp"
 #include "network/difficulty.hpp"
 #include "network/submitter.hpp"
-#include "network/updater.hpp"
 #include "queue/store.hpp"
 #include "app/instance_lock.hpp"
 #include "util/logger.hpp"
@@ -44,8 +42,6 @@ public:
     void persist_queue_for_restart();
     /// True after run()/finalize completed clean shutdown.
     bool shutdown_complete() const { return finalized_; }
-    /// Wrapper should git pull + rebuild + restart (queue already bagged).
-    bool update_requested() const { return update_requested_.load(); }
 
 private:
     struct LiveSubmitJob {
@@ -67,9 +63,6 @@ private:
     void process_live_submit(BlockHit hit, std::string kind);
     int try_flush_pending(const std::string& context, bool on_shutdown = false);
     void service_pending_queue(double now);
-    /// Consume data/drop_hashes*.txt written by the desktop backup tool.
-    /// Drops those hashes from RAM + disk so this box does not double-submit.
-    int consume_drop_list();
     void start_submit_worker();
     void stop_submit_worker();
     void submit_worker_loop();
@@ -101,7 +94,7 @@ private:
     std::unique_ptr<NvmlMonitor> gpu_;
     std::unique_ptr<BlockStore> store_;
     std::unique_ptr<Submitter> submitter_;
-    std::unique_ptr<BagForwarder> bag_forward_;
+
     std::unique_ptr<CudaEngine> engine_;
     std::unique_ptr<NetworkPoller> poller_;
     std::unique_ptr<MinerDashboard> dashboard_;
@@ -114,8 +107,6 @@ private:
 
     std::atomic<bool> running_{false};
     std::atomic<bool> shutting_down_{false};
-    std::atomic<bool> update_requested_{false};
-    double last_update_check_ = 0;
     double last_config_check_ = 0;
     std::filesystem::file_time_type config_mtime_{};
     std::mutex persist_mu_;  // serialize bag/persist from console handler + main
@@ -130,6 +121,9 @@ private:
     uint64_t last_poll_seq_ = 0;
     double defer_submit_until_ = 0;
     double submit_backoff_until_ = 0;  // after transport fail: queue only, keep mining
+    bool verify_alive_ = false;        // last POST /verify probe (used when GET /difficulty is down)
+    double verify_probe_at_ = 0;
+    bool verify_probe_logged_down_ = false;
 
     double cooldown_until_ = 0;
     double last_queue_flush_ = 0;
@@ -163,19 +157,22 @@ private:
     std::atomic<bool> submit_worker_running_{false};
 
     bool live_submit_allowed() const;
-    /// Queue flush gate: live /difficulty, or hybrid last-good m= == force-mine pin.
+    /// Queue flush gate: known m= (live or last-good). GET /difficulty down does not block POST /verify.
     bool flush_submit_allowed() const;
+    /// GET /difficulty live → true. Otherwise POST /verify probe (cached) before pushing a hash.
+    bool verify_ready_to_push();
     bool network_matches_hit_m(int hit_m) const;
     bool can_submit_hit_m(int hit_m) const;
     bool force_mine_mode() const { return settings_.force_mine_memory_cost > 0; }
     bool bag_only() const { return !settings_.submit_enabled; }
+    /// Bag a hit that cannot submit now (wrong m= / XUNI off-window).
+    bool should_store() const { return settings_.store_blocks || bag_only(); }
     int forced_mine_m() const { return settings_.force_mine_memory_cost; }
     /// Live network m= for public stats (Woody). 0 = unknown / N/A — never mine m=.
     int network_difficulty_for_public() const;
     void note_submit_transport_failure(const char* where, int status = 0);
     void log_flush_skip(const std::string& why);
     int live_submit_timeout_s() const;
-    void maybe_check_update(double now);
     void maybe_reload_config(double now);
     void push_flush_status(int inflight, int pool, int bag_q);
 };

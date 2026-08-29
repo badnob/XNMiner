@@ -23,6 +23,8 @@ public:
               SessionLogger* logger = nullptr, std::string proxy = {});
 
     SubmitResult submit(const BlockHit& hit, int timeout_s = 20, bool quiet = false);
+    /// Same POST path as submit, empty JSON. True if /verify answered (not 0/502/503/504).
+    bool probe(int timeout_s = 3);
 
 private:
     std::string verify_url_;

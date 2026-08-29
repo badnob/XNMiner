@@ -1,6 +1,5 @@
 /build/
 /data/
-/miner.ini
 *.o
 *.obj
 *.a

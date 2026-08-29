@@ -359,7 +359,7 @@ thread_local CurlKeepAlive tls_curl;
 void apply_curl_proxy(CURL* curl, const std::string& proxy) {
     if (!curl || proxy.empty()) return;
     curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str());
-    // socks5h = resolve xenblocks.io on the exit, not on the shared Vast IP.
+    // socks5h = resolve xenblocks.io on the proxy exit, not on this box.
     std::string scheme = proxy;
     auto cut = scheme.find("://");
     if (cut != std::string::npos) scheme = scheme.substr(0, cut);
@@ -451,7 +451,7 @@ HttpResponse http_post_json(const std::string& url, const std::string& json_body
                             const std::string& proxy) {
 #ifdef _WIN32
     const std::string ua = user_agent.empty() ? "python-requests/2.31.0" : user_agent;
-    (void)proxy;  // SOCKS /verify proxy is the Linux Vast path (libcurl).
+    (void)proxy;  // SOCKS /verify proxy is the Linux libcurl path.
     return winhttp_oneshot("POST", url, json_body, timeout_ms, "application/json; charset=utf-8",
                            ua);
 #else

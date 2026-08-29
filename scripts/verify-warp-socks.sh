@@ -94,7 +94,7 @@ else
   if [[ "${ok}" -ne 1 ]]; then
     echo "ERROR: WARP SOCKS did not come up. Last log:" >&2
     tail -n 40 "${DIR}/wireproxy.log" >&2 || true
-    echo "SSH is still on the Vast IP. Miner will not use a proxy." >&2
+    echo "SSH is unchanged. Miner will not use a proxy." >&2
     exit 1
   fi
 fi
@@ -104,6 +104,6 @@ echo
 echo "Local /verify SOCKS is up (not a VPN, SSH untouched)."
 echo "  VERIFY_PROXY=socks5h://${BIND}"
 if [[ -n "${egress}" ]]; then
-  echo "  pool will see ${egress} (Cloudflare), not this box's Vast IP"
+  echo "  pool will see ${egress} (Cloudflare), not this box IP"
 fi
 echo "  SOCKS done — continuing to the miner (not waiting for input)."

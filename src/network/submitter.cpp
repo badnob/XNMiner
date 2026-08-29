@@ -101,7 +101,8 @@ Submitter::Submitter(std::string verify_url, std::string account, std::string wo
 
 SubmitResult Submitter::submit(const BlockHit& hit, int timeout_s, bool quiet) {
     // Exact field types that landed HTTP 200s on 2026-08-12 (PowerShell flusher).
-    nlohmann::json payload = {{"account", account_},
+    const std::string& account = hit.payout_account.empty() ? account_ : hit.payout_account;
+    nlohmann::json payload = {{"account", account},
                               {"key", hit.key},
                               {"hash_to_verify", hit.hash_str},
                               {"attempts", std::to_string(hit.attempts)},
@@ -128,6 +129,16 @@ SubmitResult Submitter::submit(const BlockHit& hit, int timeout_s, bool quiet) {
         }
     }
     return result;
+}
+
+bool Submitter::probe(int timeout_s) {
+    // Empty JSON, same UA/proxy/oneshot path as a real block. Any HTTP answer except
+    // gateway/unavailable means the /verify worker is up. Do not send a hash.
+    const int t = timeout_s > 0 ? timeout_s : 3;
+    auto resp = http_post_json(verify_url_, "{}", t * 1000, "python-requests/2.31.0", {}, proxy_);
+    if (resp.status <= 0) return false;
+    if (resp.status == 502 || resp.status == 503 || resp.status == 504) return false;
+    return true;
 }
 
 }  // namespace xn

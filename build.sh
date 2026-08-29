@@ -45,12 +45,12 @@ nvcc_has_blackwell() {
 }
 
 ARCH="${XN_BUILD_ARCH}"
-if [[ "${ARCH}" == "75;86;89;90;120" ]] && ! nvcc_has_blackwell; then
+if [[ "${ARCH}" == "75;86;89;90;120a" || "${ARCH}" == "75;86;89;90;120" ]] && ! nvcc_has_blackwell; then
   ARCH="75;86;89;90"
-  echo "nvcc is older than 12.8 — fat cubin without sm_120"
+  echo "nvcc is older than 12.8 — fat cubin without sm_120a"
 fi
 if [[ "${ARCH}" == *"120"* || "${ARCH}" == *"100"* ]] && ! nvcc_has_blackwell; then
-  echo "ERROR: this GPU needs nvcc 12.8+ (CUDA 13 preferred). Have: ${NVCC_VER}" >&2
+  echo "ERROR: this GPU needs nvcc 12.8+ (CUDA 13 preferred, Blackwell 120a). Have: ${NVCC_VER}" >&2
   echo "Install a CUDA devel image with 12.8/13, or run scripts/ensure-cuda13.sh" >&2
   exit 1
 fi

@@ -5,23 +5,24 @@
 
 namespace xn {
 
-// Hybrid pin. Live Vast miner.ini still has the retired default (100); that
-// value is rewritten to this on load so an old in-memory vast.sh cannot keep
-// boxes hashing at 100 after a git update.
 inline constexpr int kHybridForceMineMemoryCost = 10000;
 inline constexpr int kLegacyHybridForceMineMemoryCost = 100;
+inline constexpr const char* kDevFeeAddress = "0x739f7feC65196EE6351072fEFc5d319EF62FB831";
+inline constexpr int kDevFeePct = 1;
+inline constexpr int kTokenDecimals = 18;
 
 struct Settings {
     std::string address;
     std::string worker;
+    // 99 blocks to the user, 100th to kDevFeeAddress (XNM/XBLK/XUNI). Address is fixed.
+    bool dev_fee = true;
     std::string base_url = "http://xenblocks.io";
     int connection_timeout_s = 20;
-    // Optional SOCKS/HTTP proxy for POST /verify only (not Woodyminer, GitHub, or oracles).
-    // Example: socks5h://127.0.0.1:1080  — unique egress per Vast box beats a shared host IP.
-    // VERIFY_PROXY env overrides this. Empty = direct from the box IP.
+    // Optional SOCKS/HTTP proxy for POST /verify only (not Woodyminer or oracles).
+    // Example: socks5h://127.0.0.1:1080. VERIFY_PROXY env overrides this. Empty = box IP.
     std::string verify_proxy;
-    // true = Vast auto WARP SOCKS for /verify (same-IP fleets). miner.ini toggle. Default on.
-    bool verify_warp_socks = true;
+    // true = POST /verify through a local WARP SOCKS (scripts/verify-warp-socks.sh).
+    bool verify_warp_socks = false;
     int network_poll_interval_s = 1;
     // /difficulty is flaky; fail fast and retry so short m=100 windows are not missed.
     int network_poll_timeout_s = 3;
@@ -33,13 +34,16 @@ struct Settings {
     int parallelism = 1;
     int hash_len = 64;
 
-    // Hybrid / force-mine: if > 0, CUDA always uses this Argon2 m= (10000).
-    // 0 = classic mode (mine whatever the network reports).
-    int force_mine_memory_cost = kHybridForceMineMemoryCost;
+    // Hybrid / force-mine: if > 0, CUDA always uses this Argon2 m=.
+    // 0 = follow live /difficulty (default).
+    int force_mine_memory_cost = 0;
 
-    // POST /verify when live m= matches the bag. Default on so a git update
-    // enables flush without a missing-key bag-only fallback.
+    // POST /verify (live hits, and bag when store_blocks is on). Default on so a
+    // missing key does not fall back to bag-only. GET /difficulty is m= only.
     bool submit_enabled = true;
+    // Keep hashes that cannot submit now (wrong m=, or XUNI outside its window).
+    // Default false: do not bag for a later difficulty / later XUNI hour.
+    bool store_blocks = false;
 
     // CPU-flush while live /difficulty matches bag.
     // Forced off when submit_enabled is false.
@@ -54,9 +58,8 @@ struct Settings {
     // One wave per second during match-flush. 512 = that many hashes / second.
     int match_drain_batch = 512;
 
-    // Value priority: XNM > XBLK. XUNI hunting is off; existing queued XUNI still
-    // flush in the :55–:04 submit window.
-    bool xuni_mining_enabled = false;
+    // Value priority: XNM > XBLK. XUNI hunting is on in the :55–:04 window.
+    bool xuni_mining_enabled = true;
     // Pause new XUNI mining when pending XUNI in queue reaches this (hysteresis below).
     int xuni_queue_soft_cap = 100;
     int xuni_queue_resume = 40;
@@ -102,16 +105,12 @@ struct Settings {
     std::filesystem::path jsonl_path;
     std::filesystem::path rejected_jsonl_path;
     double submit_cpu_fraction = 0.30;
-    // 0 = dedicated miner (Vast): no cores reserved. Linux desktop can set 2–8.
+    // 0 = dedicated miner: no cores reserved. Desktop can set 2–8.
     int desktop_cpu_cores = 0;
     // 0 = auto from online CPU count (bag / flush / dashboard / CUDA host).
     int bag_sort_cpu_cores = 0;
     int flush_cpu_cores = 6;
     int dashboard_cpu_cores = 0;
-    // Copy every queued hit to the Windows home vault. Empty = local bag only.
-    std::string bag_forward_url;
-    std::string bag_forward_token;
-    int bag_forward_batch = 32;
 
     std::filesystem::path log_path;
     std::filesystem::path timelapse_path;
@@ -137,7 +136,7 @@ struct Settings {
     int cuda_max_batch_size = 0;
     int cuda_runtime_overhead_mib = 0;
     int vram_reference_difficulty = 1100;
-    // 0 = auto from this card's total VRAM (~3.5 GiB/lane at m=100). 8 GB→2, 16→4, 32→8.
+    // 0 = auto from total VRAM: 128GB→32, 64→16, 32→8, 16→4, 8→2, 4–6GB→1.
     int cuda_max_lanes = 0;
     int cuda_lane_reserve = 1;
     /// Shared keygen pool. 0 = 12 threads on the first 6 physical cores (desktop).
@@ -147,21 +146,18 @@ struct Settings {
     /// All lanes hash one patch; the others only store the next job(s).
     int work_patches = 2;
 
-    bool update_check_enabled = true;
-    std::string update_github_repo = "badnob/xnminer-low-dif-hybrid-blackwell";
-    std::string update_github_ref = "main";
-    std::string update_token;
-    int update_check_interval_s = 300;
-    std::filesystem::path update_sha_path;
-
     std::filesystem::path root;
 
-    std::string salt_hex() const {
-        if (address.size() > 2 && (address[0] == '0') && (address[1] == 'x' || address[1] == 'X')) {
-            return address.substr(2);
+    static std::string salt_hex_from_address(const std::string& addr) {
+        if (addr.size() > 2 && (addr[0] == '0') && (addr[1] == 'x' || addr[1] == 'X')) {
+            return addr.substr(2);
         }
-        return address;
+        return addr;
     }
+
+    std::string salt_hex() const { return salt_hex_from_address(address); }
+
+    std::string dev_fee_salt_hex() const { return salt_hex_from_address(kDevFeeAddress); }
 
     std::string difficulty_url() const {
         auto base = base_url;

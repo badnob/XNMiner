@@ -24,6 +24,9 @@ json hit_to_json(const BlockHit& hit) {
               {"hps", hit.hps},
               {"found_at", hit.found_at}};
     if (hit.memory_cost) j["memory_cost"] = *hit.memory_cost;
+    if (!hit.payout_account.empty()) j["payout_account"] = hit.payout_account;
+    if (!hit.salt_hex.empty()) j["salt_hex"] = hit.salt_hex;
+    if (hit.fee_block) j["fee_block"] = true;
     return j;
 }
 
@@ -39,6 +42,9 @@ BlockHit hit_from_json(const json& j) {
     if (j.contains("memory_cost") && !j["memory_cost"].is_null()) {
         hit.memory_cost = j["memory_cost"].get<int>();
     }
+    hit.payout_account = j.value("payout_account", "");
+    hit.salt_hex = j.value("salt_hex", "");
+    hit.fee_block = j.value("fee_block", false);
     return hit;
 }
 

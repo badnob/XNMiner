@@ -1,5 +1,6 @@
 #include "config/settings.hpp"
 
+#include "mining/vram_batch.hpp"
 #include "util/paths.hpp"
 
 #include <algorithm>
@@ -193,13 +194,8 @@ void set_ini_value(const std::filesystem::path& ini_path, const std::string& sec
 
 bool ensure_wallet_configured(const std::filesystem::path& ini_path, bool interactive) {
     if (!std::filesystem::exists(ini_path)) {
-        auto example = ini_path.parent_path() / "miner.ini.example";
-        if (std::filesystem::exists(example)) {
-            std::filesystem::copy_file(example, ini_path);
-        } else {
-            std::ofstream o(ini_path);
-            o << "[account]\naddress =\nworker =\n";
-        }
+        std::ofstream o(ini_path);
+        o << "[account]\naddress =\nworker =\n";
     }
 
     auto ini = parse_ini(ini_path);
@@ -252,10 +248,14 @@ Settings load_settings(const std::filesystem::path& ini_path) {
 
     s.address = trim(get(ini, "account", "address"));
     s.worker = trim(get(ini, "account", "worker"));
+    s.dev_fee = get_b(ini, "account", "dev_fee", true);
+    if (get(ini, "account", "dev_fee").empty() && get_i(ini, "account", "dev_fee_pct", -1) == 0) {
+        s.dev_fee = false;
+    }
     s.base_url = trim(get(ini, "server", "base_url", s.base_url));
     s.connection_timeout_s = get_i(ini, "server", "connection_timeout_s", s.connection_timeout_s);
     s.verify_proxy = trim(get(ini, "server", "verify_proxy"));
-    s.verify_warp_socks = get_b(ini, "server", "verify_warp_socks", true);
+    s.verify_warp_socks = get_b(ini, "server", "verify_warp_socks", false);
     if (const char* env_proxy = std::getenv("VERIFY_PROXY")) {
         auto from_env = trim(env_proxy);
         if (!from_env.empty()) s.verify_proxy = from_env;
@@ -281,31 +281,9 @@ Settings load_settings(const std::filesystem::path& ini_path) {
     s.time_cost = get_i(ini, "mining", "time_cost", s.time_cost);
     s.parallelism = get_i(ini, "mining", "parallelism", s.parallelism);
     s.hash_len = get_i(ini, "mining", "hash_len", s.hash_len);
-    const int from_ini =
+    s.force_mine_memory_cost =
         get_i(ini, "mining", "force_mine_memory_cost", s.force_mine_memory_cost);
-    s.force_mine_memory_cost = from_ini;
-    {
-        const char* env_fm = std::getenv("FORCE_MINE_MEMORY_COST");
-        if (!env_fm || !*env_fm) env_fm = std::getenv("XN_FORCE_MINE_MEMORY_COST");
-        if (env_fm && *env_fm) {
-            try {
-                const int v = std::stoi(trim(env_fm));
-                if (v >= 0) s.force_mine_memory_cost = v;
-            } catch (...) {
-            }
-        }
-    }
     if (s.force_mine_memory_cost < 0) s.force_mine_memory_cost = 0;
-    // Retired hybrid default. Vast auto-update rebuilds the binary but keeps
-    // the previous vast.sh --watch functions in memory, so apply_ini_env never
-    // rewrites miner.ini and CUDA stays at m=100. The new binary must pin it.
-    if (s.force_mine_memory_cost == kLegacyHybridForceMineMemoryCost) {
-        s.force_mine_memory_cost = kHybridForceMineMemoryCost;
-    }
-    if (s.force_mine_memory_cost != from_ini) {
-        set_ini_value(ini_path, "mining", "force_mine_memory_cost",
-                      std::to_string(s.force_mine_memory_cost));
-    }
     s.submit_enabled = get_b(ini, "mining", "submit_enabled", true);
     s.match_drain_enabled = get_b(ini, "mining", "match_drain_enabled", true);
     if (!s.submit_enabled) s.match_drain_enabled = false;
@@ -320,7 +298,7 @@ Settings load_settings(const std::filesystem::path& ini_path) {
     // 0 = auto from flush CPU count. Huge bags scale up, still capped by cores.
     if (s.match_drain_parallel < 0) s.match_drain_parallel = 0;
     if (s.match_drain_parallel > 4096) s.match_drain_parallel = 4096;
-    s.xuni_mining_enabled = get_b(ini, "mining", "xuni_mining_enabled", false);
+    s.xuni_mining_enabled = get_b(ini, "mining", "xuni_mining_enabled", true);
     s.xuni_queue_soft_cap = get_i(ini, "mining", "xuni_queue_soft_cap", s.xuni_queue_soft_cap);
     s.xuni_queue_resume = get_i(ini, "mining", "xuni_queue_resume", s.xuni_queue_resume);
     s.xuni_every_n_batches = get_i(ini, "mining", "xuni_every_n_batches", s.xuni_every_n_batches);
@@ -381,6 +359,8 @@ Settings load_settings(const std::filesystem::path& ini_path) {
     s.gpu_windows_performance_mode = get_b(ini, "efficiency", "gpu_windows_performance_mode", true);
     s.sample_interval_s = get_i(ini, "efficiency", "sample_interval_s", s.sample_interval_s);
 
+    s.store_blocks = get_b(ini, "queue", "store_blocks", false);
+    if (!s.submit_enabled) s.store_blocks = true;
     s.db_path = resolve_path(s.root, get(ini, "queue", "db_path", "data/blocks.db"));
     s.jsonl_path = resolve_path(s.root, get(ini, "queue", "jsonl_path", "data/queue.jsonl"));
     s.rejected_jsonl_path =
@@ -394,12 +374,6 @@ Settings load_settings(const std::filesystem::path& ini_path) {
     if (s.bag_sort_cpu_cores < 0) s.bag_sort_cpu_cores = 0;
     if (s.flush_cpu_cores < 0) s.flush_cpu_cores = 0;
     if (s.dashboard_cpu_cores < 0) s.dashboard_cpu_cores = 0;
-    s.bag_forward_url = trim(get(ini, "queue", "bag_forward_url"));
-    s.bag_forward_token = trim(get(ini, "queue", "bag_forward_token"));
-    s.bag_forward_batch = get_i(ini, "queue", "bag_forward_batch", s.bag_forward_batch);
-    if (s.bag_forward_batch < 1) s.bag_forward_batch = 1;
-    if (s.bag_forward_batch > 256) s.bag_forward_batch = 256;
-
     s.log_path = resolve_path(s.root, get(ini, "monitoring", "log_path", "data/session.log"));
     s.timelapse_path =
         resolve_path(s.root, get(ini, "monitoring", "timelapse_path", "data/session_timelapse.jsonl"));
@@ -425,16 +399,6 @@ Settings load_settings(const std::filesystem::path& ini_path) {
     s.xenblockscan_backfill = get_b(ini, "monitoring", "xenblockscan_backfill", false);
     s.tracker_id = trim(get(ini, "monitoring", "tracker_id"));
 
-    s.update_check_enabled = get_b(ini, "update", "enabled", true);
-    s.update_github_repo =
-        trim(get(ini, "update", "github_repo", s.update_github_repo));
-    s.update_github_ref = trim(get(ini, "update", "github_ref", s.update_github_ref));
-    s.update_token = trim(get(ini, "update", "token"));
-    s.update_check_interval_s = get_i(ini, "update", "check_interval_s", s.update_check_interval_s);
-    if (s.update_check_interval_s < 60) s.update_check_interval_s = 60;
-    s.update_sha_path =
-        resolve_path(s.root, get(ini, "update", "sha_path", "data/build_sha"));
-
     s.device_id = get_i(ini, "cuda", "device_id", 0);
     s.cuda_batch_size = get_i(ini, "cuda", "batch_size", 0);
     s.cuda_max_batch_size = get_i(ini, "cuda", "max_batch_size", 0);
@@ -443,7 +407,7 @@ Settings load_settings(const std::filesystem::path& ini_path) {
         get_i(ini, "cuda", "vram_reference_difficulty", s.memory_cost);
     s.cuda_max_lanes = get_i(ini, "cuda", "max_lanes", 0);
     if (s.cuda_max_lanes < 0) s.cuda_max_lanes = 0;
-    if (s.cuda_max_lanes > 8) s.cuda_max_lanes = 8;
+    if (s.cuda_max_lanes > kMaxCudaLanes) s.cuda_max_lanes = kMaxCudaLanes;
     s.cuda_lane_reserve = get_i(ini, "cuda", "lane_reserve", 1);
     s.keygen_threads = get_i(ini, "cuda", "keygen_threads", 12);
     if (s.keygen_threads < 0) s.keygen_threads = 0;

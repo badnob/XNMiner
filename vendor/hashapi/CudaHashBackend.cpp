@@ -708,7 +708,7 @@ HashApiResult CudaHashBackend::runBatch(const HashApiRequest& request)
         } else {
         // Windows Desktop full wave: async-finalize the previous snapshot so it
         // overlaps this lane's keygen + GPU. Do NOT keygen the next patch
-        // before finish() — that left the 5090 at ~55% util on Vast.
+        // before finish() — that left the 5090 at ~55% util.
 
         std::future<HashApiResult> prev_finalize;
         if (pending_.ready) {
@@ -825,7 +825,7 @@ HashApiResult CudaHashBackend::runBatch(const HashApiRequest& request)
         const auto compute_start = std::chrono::steady_clock::now();
         compute_backend.run();
         // Fill the NEXT key bag while this oneshot runs so the GPU does not
-        // sit idle on the following wave (Vast was ~50% util without this).
+        // sit idle on the following wave (~50% util without this).
         if (request.gpu_first_blocks && !single_key && attempts > 1) {
             next_keys_.resize(key_bytes);
             char* dst = reinterpret_cast<char*>(next_keys_.data());

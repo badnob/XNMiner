@@ -40,8 +40,12 @@ std::string lane_prefix(int lane) {
 CudaEngine::CudaEngine(const Settings& settings)
     : settings_(settings),
       difficulty_(settings.memory_cost),
-      max_lanes_cap_(settings.cuda_max_lanes > 0 ? std::min(8, settings.cuda_max_lanes) : 8),
-      config_max_lanes_(settings.cuda_max_lanes > 0 ? std::min(8, settings.cuda_max_lanes) : 8) {}
+      max_lanes_cap_(settings.cuda_max_lanes > 0
+                         ? std::min(kMaxCudaLanes, settings.cuda_max_lanes)
+                         : kMaxCudaLanes),
+      config_max_lanes_(settings.cuda_max_lanes > 0
+                            ? std::min(kMaxCudaLanes, settings.cuda_max_lanes)
+                            : kMaxCudaLanes) {}
 
 CudaEngine::~CudaEngine() { stop(); }
 
@@ -538,7 +542,44 @@ std::optional<BlockHit> CudaEngine::hit_from_match(const std::string& key, const
     hit.hps = hps;
     hit.found_at = now_iso_local();
     hit.memory_cost = difficulty_;
+    hit.payout_account = active_payout_;
+    hit.salt_hex = active_salt_;
+    hit.fee_block = mining_fee_;
     return hit;
+}
+
+void CudaEngine::select_payout_salt() {
+    const bool same = !settings_.address.empty() &&
+                      Settings::salt_hex_from_address(kDevFeeAddress) == settings_.salt_hex();
+    if (!settings_.dev_fee || same) {
+        mining_fee_ = false;
+        active_payout_ = settings_.address;
+        active_salt_ = settings_.salt_hex();
+        return;
+    }
+    if (mining_fee_) {
+        active_payout_ = kDevFeeAddress;
+        active_salt_ = settings_.dev_fee_salt_hex();
+    } else {
+        active_payout_ = settings_.address;
+        active_salt_ = settings_.salt_hex();
+    }
+}
+
+void CudaEngine::stamp_and_count_hits(std::vector<BlockHit>& hits) {
+    if (hits.empty() || !settings_.dev_fee) return;
+    const int n = static_cast<int>(hits.size());
+    if (mining_fee_) {
+        fee_finds_in_cycle_ += n;
+        if (fee_finds_in_cycle_ >= kDevFeePct) {
+            mining_fee_ = false;
+            user_finds_in_cycle_ = 0;
+            fee_finds_in_cycle_ = 0;
+        }
+    } else {
+        user_finds_in_cycle_ += n;
+        if (user_finds_in_cycle_ >= 100 - kDevFeePct) mining_fee_ = true;
+    }
 }
 
 namespace {
@@ -583,7 +624,8 @@ MineBatchResult CudaEngine::mine_batch() {
     // Taper minute: at most one XUNI lane even if config allows more.
     int xuni_lanes = std::max(0, settings_.xuni_max_lanes);
     if (allow_xuni_base && in_xuni_taper_window()) xuni_lanes = std::min(xuni_lanes, 1);
-    const std::string salt = settings_.salt_hex();
+    select_payout_salt();
+    const std::string salt = active_salt_.empty() ? settings_.salt_hex() : active_salt_;
 
     MineBatchResult out;
     double total_hs = 0.0;
@@ -648,6 +690,8 @@ MineBatchResult CudaEngine::mine_batch() {
                     box.allow_xuni_base = allow_xuni_base;
                     box.device_id = settings_.device_id;
                     box.work_patches = 0;
+                    box.consumed.store(box.produced.load(std::memory_order_relaxed),
+                                       std::memory_order_relaxed);
                     box.seq.fetch_add(1, std::memory_order_release);
                     kick = true;
                 }
@@ -682,6 +726,7 @@ MineBatchResult CudaEngine::mine_batch() {
     last_hashrate_ = total_hs;
     for (auto& h : out.hits) h.hps = total_hs;
     if (out.hit) out.hit->hps = total_hs;
+    stamp_and_count_hits(out.hits);
     // Stable order: better blocks first, then older attempts.
     std::sort(out.hits.begin(), out.hits.end(), [](const BlockHit& a, const BlockHit& b) {
         int ra = hit_rank(a), rb = hit_rank(b);
@@ -710,6 +755,7 @@ MineBatchResult CudaEngine::drain_pipeline() {
         }
     }
     if (out.hit) out.hit->hps = total_hs;
+    stamp_and_count_hits(out.hits);
     return out;
 }
 

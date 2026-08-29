@@ -7,6 +7,7 @@ namespace xn {
 
 inline constexpr uint64_t CUDA_ENGINE_RESERVE_BYTES = 100ULL * 1024ULL * 1024ULL;
 inline constexpr double BYTES_PER_ATTEMPT_FACTOR = 1.001;
+inline constexpr int kMaxCudaLanes = 32;
 
 struct CudaVramPlan {
     int batch_size = 0;
@@ -33,8 +34,8 @@ struct CudaVramPlan {
 
 double bytes_per_attempt(int difficulty);
 int cuda_lane_count(int difficulty, int reference_difficulty, int max_lanes);
-// Hunt lanes from this card's total VRAM (1..8). 8GB→2, 16GB→4, 24GB→6, 32GB→8.
-// Independent of Argon2 m= — high hybrid m= shrinks batch, not lane count.
+// Fixed VRAM → lanes. 128GB→32, 64→16, 32→8, 16→4, 8→2, 4–6GB→1.
+// Batch size is what fills leftover VRAM at the current m=.
 int suggested_max_lanes(int total_vram_mib);
 uint64_t estimate_batch_vram_bytes(int batch_size, int difficulty);
 int memory_limited_batch_size(uint64_t free_vram_bytes, int difficulty,

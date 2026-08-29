@@ -38,23 +38,17 @@ double bytes_per_attempt(int difficulty) {
 }
 
 int suggested_max_lanes(int total_vram_mib) {
-    // Fixed VRAM layout. ~3.5 GiB/lane was sized at m=100; hybrid m=10000 keeps
-    // the same lane count and fills each lane with fewer hashes.
-    if (total_vram_mib >= 28000) return 8;
-    if (total_vram_mib >= 22000) return 6;
-    if (total_vram_mib >= 16000) return 4;
-    if (total_vram_mib >= 12000) return 3;
-    if (total_vram_mib >= 8000) return 2;
-    if (total_vram_mib >= 4000) return 1;
-    return 1;
+    // Fixed table. Do not scale lanes with m= or leftover VRAM.
+    if (total_vram_mib >= 112 * 1024) return 32;  // 128 GB
+    if (total_vram_mib >= 56 * 1024) return 16;   // 64 GB
+    if (total_vram_mib >= 28 * 1024) return 8;    // 32 GB
+    if (total_vram_mib >= 14 * 1024) return 4;    // 16 GB
+    if (total_vram_mib >= 7 * 1024) return 2;     // 8 GB
+    return 1;                                    // 4 GB, 6 GB
 }
 
 int cuda_lane_count(int /*difficulty*/, int /*reference_difficulty*/, int max_lanes) {
-    // Lane count is a VRAM layout, not a difficulty boost. Hybrid m=10000 still
-    // uses 8/6/4/2 lanes on 32/24/16/8 GB — batch per lane shrinks instead.
-    // The old gate (difficulty >= reference → 1 lane) collapsed 32 GB boxes to
-    // 1-wide as soon as force-mine left m=100.
-    return std::max(1, std::min(8, max_lanes));
+    return std::max(1, std::min(kMaxCudaLanes, max_lanes));
 }
 
 uint64_t estimate_batch_vram_bytes(int batch_size, int difficulty) {

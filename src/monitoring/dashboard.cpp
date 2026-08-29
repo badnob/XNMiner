@@ -207,6 +207,7 @@ std::string color_kinds(std::string s) {
 std::string layman_event(const std::string& action, const std::string& block,
                          const std::string& detail) {
     if (action == "FOUND") return "Found " + block;
+    if (action == "FEE") return "Dev fee " + block;
     if (action == "QUEUED") {
         if (detail.find("network") != std::string::npos) return "Saved " + block + " - net down";
         if (detail.find("pool takes") != std::string::npos) return "Saved " + block + " - pool busy";
@@ -353,7 +354,13 @@ void MinerDashboard::render() {
         if (gap < 1) gap = 1;
         row(oss, left + std::string(static_cast<size_t>(gap), ' ') + right);
     }
-    row(oss, std::string("  ") + DIM + kAppTagline + RST);
+    {
+        std::string left = std::string("  ") + DIM + kAppTagline + RST;
+        std::string right = std::string(CYAN) + kSiteUrl + RST + "  ";
+        int gap = kWidth - vis_len(left) - vis_len(right);
+        if (gap < 1) gap = 1;
+        row(oss, left + std::string(static_cast<size_t>(gap), ' ') + right);
+    }
     rule(oss);
 
     const bool flushing = status_.rfind("FLUSH", 0) == 0;

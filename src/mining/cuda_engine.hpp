@@ -100,8 +100,8 @@ private:
         std::string ring_err[kRing];
     };
 
-    static constexpr int kMaxLaneMailboxes = 16;
-    static constexpr int kMaxGroups = 8;
+    static constexpr int kMaxLaneMailboxes = kMaxCudaLanes;
+    static constexpr int kMaxGroups = kMaxCudaLanes;
     static constexpr int kInnerSwaps = 256;
     static constexpr double kInnerSeconds = 1.5;
 
@@ -138,8 +138,8 @@ private:
     size_t group_launch_batch_[kMaxGroups] = {};
     int inflight_group_ = -1;
     size_t pipeline_batch_ = 0;
-    int max_lanes_cap_ = 8;
-    int config_max_lanes_ = 8;
+    int max_lanes_cap_ = kMaxCudaLanes;
+    int config_max_lanes_ = kMaxCudaLanes;
     double thermal_batch_scale_ = 1.0;
     int thermal_idle_ms_ = 0;
     ThermalHuntState thermal_hunt_{};
@@ -177,7 +177,15 @@ private:
     bool xuni_queue_paused_ = false;
     bool last_allow_xuni_ = false;
 
+    bool mining_fee_ = false;
+    int user_finds_in_cycle_ = 0;
+    int fee_finds_in_cycle_ = 0;
+    std::string active_payout_;
+    std::string active_salt_;
+
     bool compute_allow_xuni_base();
+    void select_payout_salt();
+    void stamp_and_count_hits(std::vector<BlockHit>& hits);
 };
 
 }  // namespace xn

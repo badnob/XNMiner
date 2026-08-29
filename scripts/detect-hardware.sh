@@ -12,7 +12,7 @@ xn_trim() { printf '%s' "$1" | tr -d '[:space:]'; }
 xn_family_from_arch() {
   local arch="$1"
   case "${arch}" in
-    120|121|100|101|103) echo "Blackwell" ;;
+    120|120a|121|100|101|103) echo "Blackwell" ;;
     90) echo "Hopper" ;;
     89) echo "Ada" ;;
     87) echo "Orin" ;;
@@ -27,11 +27,11 @@ xn_family_from_arch() {
 
 xn_suggested_lanes() {
   local mib="${1:-0}"
-  if [[ "${mib}" -ge 28000 ]]; then echo 8
-  elif [[ "${mib}" -ge 22000 ]]; then echo 6
-  elif [[ "${mib}" -ge 16000 ]]; then echo 4
-  elif [[ "${mib}" -ge 12000 ]]; then echo 3
-  elif [[ "${mib}" -ge 8000 ]]; then echo 2
+  if [[ "${mib}" -ge 114688 ]]; then echo 32
+  elif [[ "${mib}" -ge 57344 ]]; then echo 16
+  elif [[ "${mib}" -ge 28672 ]]; then echo 8
+  elif [[ "${mib}" -ge 14336 ]]; then echo 4
+  elif [[ "${mib}" -ge 7168 ]]; then echo 2
   else echo 1
   fi
 }
@@ -52,11 +52,20 @@ xn_cap_to_arch() {
     echo "${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
     return
   fi
-  if [[ "${cap}" =~ ^[0-9]+$ ]]; then
+  if [[ "${cap}" =~ ^[0-9]+a?$ ]]; then
     echo "${cap}"
     return
   fi
   echo ""
+}
+
+# Blackwell consumer builds as 120a (arch-specific SASS). nvidia-smi still says 12.0.
+xn_build_arch() {
+  local sm="$1"
+  case "${sm}" in
+    120|121) echo "120a" ;;
+    *) echo "${sm}" ;;
+  esac
 }
 
 xn_detect_hardware() {
@@ -105,15 +114,16 @@ xn_detect_hardware() {
 
   XN_GPU_COUNT="${#names[@]}"
   if [[ "${XN_GPU_COUNT}" -gt 0 ]]; then
-    local i arch uniq seen
+    local i arch build uniq seen
     seen=" "
     for i in "${!names[@]}"; do
       arch="$(xn_cap_to_arch "${caps[$i]}")"
+      build="$(xn_build_arch "${arch}")"
       XN_GPU_LIST+="  [$i] ${names[$i]}  sm_${arch:-?}  ${mems[$i]} MiB"$'\n'
-      if [[ -n "${arch}" && "${seen}" != *" ${arch} "* ]]; then
+      if [[ -n "${build}" && "${seen}" != *" ${build} "* ]]; then
         if [[ -n "${XN_ARCH_LIST}" ]]; then XN_ARCH_LIST+=";"; fi
-        XN_ARCH_LIST+="${arch}"
-        seen+="${arch} "
+        XN_ARCH_LIST+="${build}"
+        seen+="${build} "
       fi
     done
     if [[ "${XN_DEVICE}" -ge "${XN_GPU_COUNT}" ]]; then
@@ -130,18 +140,18 @@ xn_detect_hardware() {
   if [[ -n "${CMAKE_CUDA_ARCHITECTURES:-}" ]]; then
     XN_BUILD_ARCH="${CMAKE_CUDA_ARCHITECTURES}"
   elif [[ -n "${XN_ARCH_LIST}" ]]; then
-    # All unique SMs in this box (mixed 4090+5090 → 89;120).
+    # All unique SMs in this box (mixed 4090+5090 → 89;120a).
     XN_BUILD_ARCH="${XN_ARCH_LIST}"
   elif [[ -n "${XN_GPU_ARCH}" ]]; then
-    XN_BUILD_ARCH="${XN_GPU_ARCH}"
+    XN_BUILD_ARCH="$(xn_build_arch "${XN_GPU_ARCH}")"
   else
     # No nvidia-smi: fat cubin so a later box can still run.
-    XN_BUILD_ARCH="75;86;89;90;120"
+    XN_BUILD_ARCH="75;86;89;90;120a"
   fi
 
   XN_NEED_CUDA13=0
-  case ";${XN_ARCH_LIST};${XN_GPU_ARCH};" in
-    *";120;"*|*";121;"*|*";100;"*|*";101;"*|*";103;"*) XN_NEED_CUDA13=1 ;;
+  case ";${XN_ARCH_LIST};${XN_GPU_ARCH};${XN_BUILD_ARCH};" in
+    *";120;"*|*";120a;"*|*";121;"*|*";100;"*|*";101;"*|*";103;"*) XN_NEED_CUDA13=1 ;;
   esac
 
   case "${XN_GPU_ARCH}" in
@@ -179,7 +189,7 @@ xn_hardware_report() {
   fi
   echo "  Using device:  ${XN_DEVICE}  ${XN_GPU_NAME:-unknown}  sm_${XN_GPU_ARCH:-?}  ${XN_GPU_FAMILY:-?}  ${XN_GPU_VRAM_MIB} MiB"
   echo "  Build arch:    ${XN_BUILD_ARCH}"
-  echo "  Auto lanes:    ${XN_SUGGESTED_LANES}  (from VRAM; 8 GB→2, 16→4, 24→6, 32→8)"
+  echo "  Auto lanes:    ${XN_SUGGESTED_LANES}  (fixed: 128GB→32, 64→16, 32→8, 16→4, 8→2, 4–6GB→1)"
   echo "  Auto batch:    ~${XN_SUGGESTED_BATCH} hashes/lane at m=100 (fills ~80% VRAM)"
   echo "  Auto keygen:   ${XN_SUGGESTED_KEYGEN} threads (from CPU cores)"
   if [[ "${XN_NEED_CUDA13}" == "1" ]]; then

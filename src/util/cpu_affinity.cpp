@@ -207,9 +207,8 @@ void init_layout(int desktop_cores, int bag_cores, int flush_cores, int dashboar
     physical_cores = static_cast<int>(cores.size());
     if (physical_cores < 1) physical_cores = 1;
 
-    // Desktop miner slice on an 8-core Vast box (7800X3D): last 2 physical
-    // cores = CUDA spin-wait, first 6 = keygen (12 SMT threads). bag/flush/
-    // dashboard share the keygen cores (they block on IO, they do not spin).
+    // Last 2 physical cores = CUDA spin-wait, first 6 = keygen (12 SMT threads).
+    // bag/flush/dashboard share the keygen cores (they block on IO, they do not spin).
     int nphys = physical_cores;
     int cuda_phys = (nphys >= 4) ? 2 : 1;
     if (cuda_phys >= nphys) cuda_phys = nphys - 1;
@@ -313,8 +312,7 @@ int cuda_host_count() {
 
 int suggested_keygen_threads() {
     std::lock_guard<std::mutex> lock(mu);
-    // Desktop default: 12 threads on 6 physical cores (SMT). An 8-core Vast
-    // box has those 6 cores once CUDA host takes the last 2.
+    // Default: 12 threads on 6 physical cores (SMT) once CUDA host takes the last 2.
     int phys = keygen_n > 0 ? keygen_n : 6;
     int n = phys * 2;
     if (n < 2) n = 2;

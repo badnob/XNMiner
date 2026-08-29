@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Install CUDA 13 *toolkit* (nvcc + cudart) without touching the NVIDIA driver.
 #
-# Desktop 16 MH/s is CUDA 13.3 SASS. Vast images ship nvcc 12.8, which compiles
-# the same sm_120 kernel to ~7 MH/s. CUDA 13.x binaries run on driver >= 580
+# CUDA 13.x nvcc for Blackwell SASS. CUDA 13 binaries run on driver >= 580
 # (minor-version compatibility). Do not apt-install cuda / cuda-drivers.
 set -euo pipefail
 
@@ -89,10 +88,8 @@ install_cuda13_packages() {
   }
   export DEBIAN_FRONTEND=noninteractive
   # Never pull a driver stack. Hold common driver packages just in case.
-  # Vast injects the GPU *kernel* module (580.x today). Do not install
-  # nvidia-driver-610 / cuda-drivers — that desyncs libcuda from the host
-  # and nvidia-smi dies until reboot, which rental boxes often cannot do.
-  # Latest we can apply on push: CUDA 13.x nvcc (desktop 16 MH/s compiler).
+  # Do not install nvidia-driver / cuda-drivers — that desyncs libcuda from
+  # the host driver and nvidia-smi dies until reboot.
   as_root apt-mark hold nvidia-driver nvidia-driver-580 nvidia-driver-570 \
     nvidia-driver-610 nvidia-open cuda-drivers cuda-drivers-580 cuda-drivers-570 2>/dev/null || true
 

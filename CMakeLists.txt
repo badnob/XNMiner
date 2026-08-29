@@ -8,13 +8,13 @@ set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # Prefer the GPU in this box. build.sh passes CMAKE_CUDA_ARCHITECTURES from
-# nvidia-smi (75 / 86 / 89 / 90 / 120). If cmake is run by hand with no -D:
-# native on CMake 3.24+, otherwise a Turing-through-Blackwell fat cubin.
+# nvidia-smi (75 / 86 / 89 / 90 / 120a). Blackwell is 120a. If cmake is run
+# by hand with no -D: native on CMake 3.24+, otherwise a Turing-through-Blackwell cubin.
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
     if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.24")
         set(CMAKE_CUDA_ARCHITECTURES native)
     else()
-        set(CMAKE_CUDA_ARCHITECTURES "75;86;89;90;120")
+        set(CMAKE_CUDA_ARCHITECTURES "75;86;89;90;120a")
     endif()
 endif()
 
@@ -33,14 +33,13 @@ add_executable(xnminer
     ${SRC_DIR}/mining/argon2_encode.cpp
     ${SRC_DIR}/mining/block_types.cpp
     ${SRC_DIR}/mining/cuda_engine.cpp
+    ${SRC_DIR}/mining/gpu_test.cpp
     ${SRC_DIR}/mining/vram_batch.cpp
     ${SRC_DIR}/efficiency/vram_policy.cpp
     ${SRC_DIR}/efficiency/thermal_policy.cpp
     ${SRC_DIR}/efficiency/gpu_power.cpp
     ${SRC_DIR}/network/difficulty.cpp
     ${SRC_DIR}/network/submitter.cpp
-    ${SRC_DIR}/network/bag_forward.cpp
-    ${SRC_DIR}/network/updater.cpp
     ${SRC_DIR}/queue/store.cpp
     ${SRC_DIR}/queue/policy.cpp
     ${SRC_DIR}/monitoring/nvml_monitor.cpp
@@ -77,7 +76,7 @@ target_include_directories(xnminer PRIVATE
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
 # Static cudart so a CUDA 13 binary runs on the image's driver-580 libcuda
-# without needing libcudart.so.13 on LD_LIBRARY_PATH after auto-update.
+# without needing libcudart.so.13 on LD_LIBRARY_PATH.
 if(UNIX AND TARGET CUDA::cudart_static)
     target_link_libraries(xnminer PRIVATE CUDA::cudart_static Threads::Threads)
 else()
@@ -90,7 +89,7 @@ if(WIN32)
         NOMINMAX
         WIN32_LEAN_AND_MEAN
     )
-    target_link_libraries(xnminer PRIVATE winhttp bcrypt advapi32 iphlpapi)
+    target_link_libraries(xnminer PRIVATE winhttp bcrypt advapi32 iphlpapi ws2_32)
 else()
     find_package(CURL REQUIRED)
     target_link_libraries(xnminer PRIVATE CURL::libcurl ${CMAKE_DL_LIBS})

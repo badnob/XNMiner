@@ -11,8 +11,7 @@ namespace xn {
 inline constexpr const char* kMinerVersion = "4.20.69-cuda-blkwll";
 inline constexpr const char* kAppName = "XNMiner CUDA";
 inline constexpr const char* kAppTagline = "Tony.x1 | pure CUDA | Blackwell";
-// Wrapper (vast.sh) treats this as "bag persisted, pull + rebuild + restart".
-inline constexpr int kExitCodeUpdate = 75;
+inline constexpr const char* kSiteUrl = "https://xenblocks.online";
 
 struct BlockHit {
     std::string key;
@@ -23,6 +22,10 @@ struct BlockHit {
     double hps = 0.0;
     std::string found_at;  // ISO local time
     std::optional<int> memory_cost;
+    /// Wallet this hash was mined for (Argon2 salt / POST /verify account).
+    std::string payout_account;
+    std::string salt_hex;
+    bool fee_block = false;
 };
 
 struct GpuSnapshot {

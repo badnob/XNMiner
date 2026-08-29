@@ -56,6 +56,8 @@ int brute_drain_parallel(int configured, int bag_q) {
     return par;
 }
 
+constexpr double kVerifyProbeTtlS = 2.0;
+
 }  // namespace
 
 Supervisor::Supervisor(Settings settings, bool use_dashboard)
@@ -99,7 +101,6 @@ Supervisor::Supervisor(Settings settings, bool use_dashboard)
     xbs_.configure(settings_.xenblockscan_enabled && !settings_.address.empty(),
                    settings_.xenblockscan_endpoint, settings_.xenblockscan_api_key,
                    settings_.xenblockscan_report_rejects);
-    consume_drop_list();
 }
 
 Supervisor::~Supervisor() {
@@ -129,7 +130,6 @@ int Supervisor::bag_live_queue_to_store(const std::string& reason) {
     }
     if (n) {
         metrics_->sync_pending(store_->pending_count());
-        if (bag_forward_) bag_forward_->notify();
     }
     return n;
 }
@@ -196,42 +196,75 @@ int Supervisor::mining_difficulty() const {
 
 bool Supervisor::live_submit_allowed() const {
     if (bag_only()) return false;
-    // Mining always continues. POST /verify is independent of GET /difficulty:
-    // hybrid last-good m= matching the force-mine pin is enough when Net is DOWN.
+    // GET /difficulty is the m= number only. When that GET is down, a fresh failed
+    // /verify probe blocks enqueue until the cache expires and we check again.
     std::lock_guard<std::mutex> lock(state_mu_);
     const double t = now_s();
     if (t < submit_backoff_until_) return false;
-    // In hybrid mode we do NOT defer submits just because network m= moved — mining m= is fixed.
+    // Classic: brief pause while CUDA replans after a live m= change.
     if (!force_mine_mode() && t < defer_submit_until_) return false;
+    if (!(network_difficulty_ && *network_difficulty_ > 0)) return false;
     if (network_ok_) return true;
-    return force_mine_mode() && network_difficulty_ && *network_difficulty_ == forced_mine_m();
+    if (verify_probe_at_ > 0 && (t - verify_probe_at_) < kVerifyProbeTtlS && !verify_alive_) {
+        return false;
+    }
+    return true;
 }
 
 bool Supervisor::flush_submit_allowed() const {
     if (bag_only()) return false;
-    // Queue flush: live ONLINE /difficulty, or hybrid last-good m= == force-mine pin
-    // (GET /difficulty DOWN/STALE must not freeze POST /verify).
+    // Same as live submit: known m= is enough. GET /difficulty DOWN/STALE must not freeze POST /verify
+    // unless the /verify probe just said the worker is down.
     std::lock_guard<std::mutex> lock(state_mu_);
     const double t = now_s();
     const bool draining = match_drain_active_.load();
     if (!draining && t < submit_backoff_until_) return false;
     if (!force_mine_mode() && t < defer_submit_until_) return false;
+    if (!(network_difficulty_ && *network_difficulty_ > 0)) return false;
     if (network_ok_) return true;
-    if (force_mine_mode() && network_difficulty_ && *network_difficulty_ == forced_mine_m()) {
-        return true;
+    if (verify_probe_at_ > 0 && (t - verify_probe_at_) < kVerifyProbeTtlS && !verify_alive_) {
+        return false;
     }
-    return false;
+    return true;
+}
+
+bool Supervisor::verify_ready_to_push() {
+    // CPU submit worker only (HTTP). GET /difficulty live → no extra probe.
+    {
+        std::lock_guard<std::mutex> lock(state_mu_);
+        if (network_ok_) return true;
+        const double t = now_s();
+        if (verify_probe_at_ > 0 && (t - verify_probe_at_) < kVerifyProbeTtlS) {
+            return verify_alive_;
+        }
+    }
+    const int timeout_s =
+        std::max(1, std::min(settings_.network_poll_timeout_s > 0 ? settings_.network_poll_timeout_s : 3,
+                             3));
+    const bool ok = submitter_ && submitter_->probe(timeout_s);
+    {
+        std::lock_guard<std::mutex> lock(state_mu_);
+        verify_alive_ = ok;
+        verify_probe_at_ = now_s();
+    }
+    if (!ok) {
+        if (!verify_probe_logged_down_) {
+            log("warn", "GET /difficulty down — /verify probe failed, not pushing");
+            verify_probe_logged_down_ = true;
+        }
+    } else if (verify_probe_logged_down_) {
+        log("info", "GET /difficulty down — /verify up, submitting at last-good m=");
+        verify_probe_logged_down_ = false;
+    }
+    return ok;
 }
 
 bool Supervisor::oracle_says_m(int m) const {
     if (m <= 0) return false;
     std::lock_guard<std::mutex> lock(state_mu_);
-    if (!(network_difficulty_ && *network_difficulty_ == m)) return false;
-    // Live ONLINE /difficulty match.
-    if (network_ok_ && !difficulty_stale_) return true;
-    // Hybrid: last-good Net m= matching the force-mine pin is enough for /verify
-    // even when GET /difficulty is DOWN or STALE. Wrong-m= from the pool is a hold.
-    return force_mine_mode() && *network_difficulty_ == forced_mine_m();
+    // Live or last-good number. GET being DOWN/STALE does not block /verify.
+    // Wrong-m= from the pool is a hold on the POST itself.
+    return network_difficulty_ && *network_difficulty_ == m;
 }
 
 bool Supervisor::oracle_left_m(int m) const {
@@ -294,7 +327,7 @@ void Supervisor::push_flush_status(int inflight, int pool, int bag_q) {
 void Supervisor::update_match_drain(double now) {
     // CPU flush while live or last-good /difficulty matches bag m=.
     // GET /difficulty DOWN does not close or block the window when last-good equals the pin.
-    if (bag_only() || !settings_.match_drain_enabled) {
+    if (bag_only() || !settings_.match_drain_enabled || !force_mine_mode()) {
         if (match_drain_active_) {
             match_drain_active_ = false;
             match_drain_gpu_parked_ = false;
@@ -424,38 +457,8 @@ void Supervisor::log_flush_skip(const std::string& why) {
     log("warn", "Queue flush skipped — " + why);
 }
 
-void Supervisor::maybe_check_update(double now) {
-    if (!settings_.update_check_enabled) return;
-    if (shutting_down_ || update_requested_) return;
-    if (last_update_check_ <= 0) {
-        last_update_check_ = now;  // first check after one full interval
-        return;
-    }
-    if (now - last_update_check_ < static_cast<double>(settings_.update_check_interval_s)) return;
-    last_update_check_ = now;
-
-    std::string token = settings_.update_token;
-    if (token.empty()) token = github_token_from_env();
-    const std::string local = read_build_sha(settings_.update_sha_path.string());
-    if (local.empty()) return;
-    auto st = check_github_update(settings_.update_github_repo, settings_.update_github_ref, token,
-                                  local);
-    if (!st.error.empty() && !st.available) {
-        log("warn", "Update check failed — " + st.error);
-        return;
-    }
-    if (!st.available) return;
-    log("info", "GitHub update " + st.local_sha.substr(0, 8) + " -> " +
-                    st.remote_sha.substr(0, 8) + " — bagging queue and restarting into new build");
-    update_requested_ = true;
-    persist_queue_for_restart();
-}
-
 void Supervisor::maybe_reload_config(double now) {
-    // Same bag-and-exit path as GitHub auto-update. vast.sh brings the process back.
-    // Do not skip during match-drain: live net m= is often 100, so a flush window
-    // would hide miner.ini / git pins forever.
-    if (shutting_down_ || update_requested_) return;
+    if (shutting_down_) return;
     if (now - last_config_check_ < 4.0) return;
     last_config_check_ = now;
 
@@ -470,9 +473,8 @@ void Supervisor::maybe_reload_config(double now) {
     }
     if (mt == config_mtime_) return;
     config_mtime_ = mt;
-    log("info", "miner.ini changed — bagging queue and restarting (same path as auto-update)");
-    if (dashboard_) dashboard_->set_status("miner.ini saved — restarting...");
-    persist_queue_for_restart();
+    log("info", "miner.ini changed — restart xnminer to apply");
+    if (dashboard_) dashboard_->set_status("miner.ini saved — restart to apply");
 }
 
 bool Supervisor::refresh_network(bool blocking, bool replan_engine) {
@@ -612,8 +614,7 @@ bool Supervisor::refresh_network(bool blocking, bool replan_engine) {
                             (st.error.empty() ? "timeout" : st.error) +
                             ") — mining at last-good m=" +
                             std::to_string(last_diff.value_or(settings_.memory_cost)) +
-                            (still_ok ? ", last-good still valid for submit"
-                                      : ", queueing submits"));
+                            ", still POST /verify");
         }
         // Last-good is still inside the fail budget — do not abort flush.
         return still_ok;
@@ -700,7 +701,6 @@ void Supervisor::queue_hit(const BlockHit& hit, const std::string& kind, const s
     metrics_->sync_pending(store_->pending_count());
     // Wake CPU submit worker so it can flush when the pool returns.
     submit_cv_.notify_one();
-    if (bag_forward_) bag_forward_->notify();
     ui_event("QUEUED", kind, retry_when);
     log("info", "QUEUED " + kind + " (" + reason + ") — retry when " + retry_when);
 }
@@ -730,12 +730,19 @@ void Supervisor::handle_hit(BlockHit hit) {
     }
     std::string kind = classify_block(hit.hash_str, hit.block_type);
     if (kind == "OTHER") kind = hit.block_type.empty() ? "OTHER" : hit.block_type;
+    // XUNI is window-only unless store_blocks is on. Do not collect around the clock.
+    if (kind == "XUNI") {
+        if (!settings_.xuni_mining_enabled && !should_store()) return;
+        if (!in_xuni_submit_window() && !should_store()) return;
+    }
     metrics_->record_found(kind);
-    log("info", "HIT " + kind + " key=" + hit.key.substr(0, std::min<size_t>(16, hit.key.size())) +
-                    "...");
-    ui_event("FOUND", kind, hit.strategy);
+    const char* fee_tag = hit.fee_block ? " FEE" : "";
+    log("info", std::string("HIT ") + kind + fee_tag + " key=" +
+                    hit.key.substr(0, std::min<size_t>(16, hit.key.size())) + "...");
+    ui_event(hit.fee_block ? "FEE" : "FOUND", kind, hit.strategy);
 
-    auto prepared = prepare_hit_for_submit(hit, settings_.salt_hex(), mining_difficulty(),
+    const std::string salt = hit.salt_hex.empty() ? settings_.salt_hex() : hit.salt_hex;
+    auto prepared = prepare_hit_for_submit(hit, salt, mining_difficulty(),
                                            settings_.time_cost, settings_.parallelism,
                                            settings_.hash_len);
     if (!prepared) {
@@ -750,6 +757,8 @@ void Supervisor::handle_hit(BlockHit hit) {
         return;
     }
 
+    const int hit_m = hit.memory_cost.value_or(mining_difficulty());
+
     if (shutting_down_) {
         queue_hit(hit, kind,
                   kind == "XUNI" && !in_xuni_submit_window() ? OUTSIDE_XUNI_WINDOW_REASON
@@ -758,8 +767,11 @@ void Supervisor::handle_hit(BlockHit hit) {
         return;
     }
 
+    // XUNI only in the :55–:04 window. Do not collect them around the clock.
     if (kind == "XUNI" && !in_xuni_submit_window()) {
-        queue_hit(hit, kind, OUTSIDE_XUNI_WINDOW_REASON, "next XUNI window");
+        if (should_store()) {
+            queue_hit(hit, kind, OUTSIDE_XUNI_WINDOW_REASON, "next XUNI window");
+        }
         return;
     }
 
@@ -770,30 +782,28 @@ void Supervisor::handle_hit(BlockHit hit) {
         return;
     }
 
-    {
-        const int hit_m = hit.memory_cost.value_or(mining_difficulty());
-        if (!can_submit_hit_m(hit_m)) {
-            double defer_until = 0;
-            bool net_ok = false;
-            int net_m = 0;
-            {
-                std::lock_guard<std::mutex> lock(state_mu_);
-                defer_until = defer_submit_until_;
-                net_ok = network_ok_;
-                net_m = network_difficulty_.value_or(0);
-            }
-            const char* reason = "network_down";
-            const char* retry = "network back";
-            if (net_ok && net_m > 0 && net_m != hit_m) {
-                reason = DIFFICULTY_CHANGE_REASON;
-                retry = "difficulty matches";
-            } else if (!force_mine_mode() && now_s() < defer_until) {
-                reason = DIFFICULTY_CHANGE_REASON;
-                retry = "mining stable";
-            }
-            queue_hit(hit, kind, reason, retry);
-            return;
+    if (!can_submit_hit_m(hit_m)) {
+        if (!should_store()) return;
+        double defer_until = 0;
+        bool net_ok = false;
+        int net_m = 0;
+        {
+            std::lock_guard<std::mutex> lock(state_mu_);
+            defer_until = defer_submit_until_;
+            net_ok = network_ok_;
+            net_m = network_difficulty_.value_or(0);
         }
+        const char* reason = "network_down";
+        const char* retry = "network back";
+        if (net_ok && net_m > 0 && net_m != hit_m) {
+            reason = DIFFICULTY_CHANGE_REASON;
+            retry = "difficulty matches";
+        } else if (!force_mine_mode() && now_s() < defer_until) {
+            reason = DIFFICULTY_CHANGE_REASON;
+            retry = "mining stable";
+        }
+        queue_hit(hit, kind, reason, retry);
+        return;
     }
 
     // Fast path: hand to CPU submit worker (no HTTP on mining thread).
@@ -806,22 +816,34 @@ void Supervisor::process_live_submit(BlockHit hit, std::string kind) {
         queue_hit(hit, kind, "bag_only", "desktop backup");
         return;
     }
+    const int hit_m = hit.memory_cost.value_or(mining_difficulty());
     if (shutting_down_) {
         queue_hit(hit, kind, SHUTDOWN_PENDING_REASON, "next start");
         return;
     }
-    if (kind == "XUNI" && !in_xuni_submit_window()) {
-        queue_hit(hit, kind, OUTSIDE_XUNI_WINDOW_REASON, "next XUNI window");
-        return;
+    if (kind == "XUNI") {
+        if (!settings_.xuni_mining_enabled && !should_store()) return;
+        if (!in_xuni_submit_window()) {
+            if (should_store()) {
+                queue_hit(hit, kind, OUTSIDE_XUNI_WINDOW_REASON, "next XUNI window");
+            }
+            return;
+        }
     }
     // Status only — never replan CUDA from this thread.
     refresh_network(false, false);
-    const int hit_m = hit.memory_cost.value_or(mining_difficulty());
     if (!can_submit_hit_m(hit_m)) {
+        if (!should_store()) return;
         if (live_submit_allowed() && !network_matches_hit_m(hit_m)) {
             queue_hit(hit, kind, DIFFICULTY_CHANGE_REASON, "difficulty matches");
         } else {
             queue_hit(hit, kind, "network_down", "network back");
+        }
+        return;
+    }
+    if (!verify_ready_to_push()) {
+        if (should_store()) {
+            queue_hit(hit, kind, "network_down", "/verify back");
         }
         return;
     }
@@ -852,7 +874,9 @@ void Supervisor::process_live_submit(BlockHit hit, std::string kind) {
 
     // Wrong-m= (body has "does not contain m=") is not shed (empty 401).
     if (is_difficulty_mismatch(result.status, result.body)) {
-        queue_hit(hit, kind, DIFFICULTY_CHANGE_REASON, "difficulty matches");
+        if (should_store()) {
+            queue_hit(hit, kind, DIFFICULTY_CHANGE_REASON, "difficulty matches");
+        }
         return;
     }
     if (is_pool_hold(result.status, result.body)) {
@@ -881,6 +905,10 @@ void Supervisor::process_live_submit(BlockHit hit, std::string kind) {
 int Supervisor::try_flush_pending(const std::string& context, bool on_shutdown) {
     // CPU submit worker only (or shutdown after mining stopped).
     if (bag_only()) return 0;
+    if (!verify_ready_to_push()) {
+        log_flush_skip("GET /difficulty down and /verify probe failed");
+        return 0;
+    }
     if (!on_shutdown) update_match_drain(now_s());
     bool draining = match_drain_active_.load() || oracle_says_m(bag_target_m());
     // Brute match-flush ignores 401/timeout backoff so a 90k bag is not frozen.
@@ -892,8 +920,8 @@ int Supervisor::try_flush_pending(const std::string& context, bool on_shutdown) 
         std::lock_guard<std::mutex> lock(state_mu_);
         if (now_s() < defer_submit_until_) return 0;
     }
-    // Hybrid last-good m= matching the force-mine pin is enough for POST /verify
-    // even when GET /difficulty is DOWN. A flaky GET must not skip the wave.
+    // Last-good m= is enough for POST /verify even when GET /difficulty is DOWN.
+    // A flaky GET must not skip the wave.
     if (!draining) {
         const bool refreshed = refresh_network(on_shutdown, /*replan_engine=*/false);
         if (!refreshed) {
@@ -955,7 +983,8 @@ int Supervisor::try_flush_pending(const std::string& context, bool on_shutdown) 
             continue;
         }
         if (!is_argon2_encoded(hit.hash_str)) {
-            auto prepared = prepare_hit_for_submit(hit, settings_.salt_hex(), hit_m,
+            const std::string salt = hit.salt_hex.empty() ? settings_.salt_hex() : hit.salt_hex;
+            auto prepared = prepare_hit_for_submit(hit, salt, hit_m,
                                                    settings_.time_cost, settings_.parallelism,
                                                    settings_.hash_len);
             if (!prepared) {
@@ -1191,66 +1220,6 @@ void Supervisor::service_pending_queue(double now) {
     }
 }
 
-int Supervisor::consume_drop_list() {
-    if (!store_) return 0;
-    namespace fs = std::filesystem;
-    std::error_code ec;
-    const fs::path dir = settings_.db_path.parent_path();
-    if (dir.empty() || !fs::exists(dir, ec)) return 0;
-
-    std::vector<fs::path> files;
-    for (const auto& ent : fs::directory_iterator(dir, ec)) {
-        if (ec || !ent.is_regular_file()) continue;
-        const auto name = ent.path().filename().string();
-        if (name.size() < 11 || name.compare(0, 11, "drop_hashes") != 0) continue;
-        if (name.find(".working") != std::string::npos) continue;
-        if (name.find(".done") != std::string::npos) continue;
-        if (ent.path().extension() != ".txt") continue;
-        files.push_back(ent.path());
-    }
-    if (files.empty()) return 0;
-
-    int total = 0;
-    for (const auto& path : files) {
-        fs::path working = path;
-        working += ".working";
-        fs::rename(path, working, ec);
-        if (ec) continue;
-        std::vector<std::string> hs;
-        {
-            std::ifstream in(working);
-            if (!in) {
-                fs::rename(working, path, ec);
-                continue;
-            }
-            std::string line;
-            while (std::getline(in, line)) {
-                while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) {
-                    line.pop_back();
-                }
-                if (line.empty() || line.front() == '#') continue;
-                hs.push_back(std::move(line));
-            }
-        }
-        int n = 0;
-        try {
-            n = store_->drop_by_hash(hs);
-        } catch (...) {
-            fs::rename(working, path, ec);
-            continue;
-        }
-        total += n;
-        fs::remove(working, ec);
-        if (n > 0) {
-            metrics_->sync_pending(store_->pending_count());
-            log("info", "Backup drop: removed " + std::to_string(n) +
-                            " queued hash(es), queue now " +
-                            std::to_string(store_->pending_count()));
-        }
-    }
-    return total;
-}
-
 void Supervisor::start_submit_worker() {
     if (submit_worker_running_) return;
     submit_worker_running_ = true;
@@ -1282,7 +1251,6 @@ void Supervisor::submit_worker_loop() {
             batch.swap(live_submit_q_);
         }
 
-        consume_drop_list();
         if (!shutting_down_.load() && !bag_only()) {
             refresh_network(false, /*replan_engine=*/false);
             update_match_drain(now_s());
@@ -1296,7 +1264,7 @@ void Supervisor::submit_worker_loop() {
             }
             if (!batch.empty()) metrics_->sync_pending(store_->pending_count());
         } else if (bag_only() || match_drain_active_.load()) {
-            // Bag-only Vast: CPU never /verify. Match-flush: do not serial-submit live hits.
+            // Bag-only: CPU never /verify. Match-flush: do not serial-submit live hits.
             const char* reason = bag_only() ? "bag_only" : MATCH_WINDOW_NEW_REASON;
             for (auto& job : batch) {
                 store_->enqueue(job.hit, reason);
@@ -1305,8 +1273,16 @@ void Supervisor::submit_worker_loop() {
             if (!batch.empty()) metrics_->sync_pending(store_->pending_count());
             if (!bag_only()) service_pending_queue(now_s());
         } else {
-            for (auto& job : batch) {
-                process_live_submit(std::move(job.hit), std::move(job.kind));
+            if (!batch.empty() && !verify_ready_to_push()) {
+                for (auto& job : batch) {
+                    if (should_store()) {
+                        queue_hit(job.hit, job.kind, "network_down", "/verify back");
+                    }
+                }
+            } else {
+                for (auto& job : batch) {
+                    process_live_submit(std::move(job.hit), std::move(job.kind));
+                }
             }
             service_pending_queue(now_s());
         }
@@ -1394,7 +1370,6 @@ void Supervisor::graceful_shutdown(const std::string& reason) {
         store_->defer_all_to_next_start();
         store_->flush();
     }
-    if (bag_forward_) bag_forward_->stop();
     stop_submit_worker();
 }
 
@@ -1406,7 +1381,6 @@ void Supervisor::finalize_session() {
     // Ensure anything still only in RAM is on disk before we tear down.
     bag_live_queue_to_store(SHUTDOWN_PENDING_REASON);
     if (store_) store_->defer_all_to_next_start();
-    if (bag_forward_) bag_forward_->stop();
     stop_submit_worker();
     if (woody_) woody_->stop();
     if (wallet_) wallet_->stop();
@@ -1472,8 +1446,8 @@ void Supervisor::run(std::optional<int> max_seconds) {
 
     poller_->start();
     if (wallet_) wallet_->start();
-    // Initial network probe — short timeouts so a dead pool cannot delay mining start.
-    // Mining uses last-good / fallback difficulty; submits queue until the pool returns.
+    // Initial network probe — short timeouts so a dead GET /difficulty cannot delay mining start.
+    // Mining uses last-good / fallback m=; POST /verify still goes out with that number.
     for (int i = 0; i < 3 && running_; ++i) {
         NetworkStatus st = poller_->poll_once(std::min(settings_.connection_timeout_s, 5));
         if (st.difficulty) {
@@ -1488,9 +1462,9 @@ void Supervisor::run(std::optional<int> max_seconds) {
         std::lock_guard<std::mutex> lock(state_mu_);
         if (network_difficulty_) {
             log("info", "Network difficulty: " + std::to_string(*network_difficulty_) +
-                            (network_ok_ ? "" : " (submit deferred — mining anyway)"));
+                            (network_ok_ ? "" : " last-good — POST /verify still on"));
         } else {
-            log("warn", "Network difficulty unavailable — using fallback for net display m=" +
+            log("warn", "Network difficulty unavailable — mining and /verify at fallback m=" +
                             std::to_string(settings_.memory_cost));
             network_difficulty_ = settings_.memory_cost;
             network_ok_ = false;
@@ -1521,12 +1495,27 @@ void Supervisor::run(std::optional<int> max_seconds) {
                                        ? "Hybrid: mine + bag (no submit)"
                                        : "Hybrid: mining fixed m=" + std::to_string(forced_mine_m()));
         }
-    }
-    if (settings_.xuni_mining_enabled) {
-        log("info", std::string("XUNI enabled — ") + XUNI_WINDOW_LABEL);
     } else {
-        log("info", std::string("XUNI mining OFF — GPU hunts XNM/XBLK only") +
-                        (bag_only() ? "" : "; queued XUNI still flush " + std::string(XUNI_WINDOW_LABEL)));
+        log("info", "Classic mode: CUDA follows live /difficulty; POST /verify uses last-good m= if GET is down");
+        if (dashboard_) dashboard_->set_status("Mining — follow live m=");
+    }
+    if (settings_.dev_fee) {
+        log("info", std::string("Dev fee 1% of XNM/XBLK/XUNI (") +
+                        std::to_string(kTokenDecimals) + " decimals): 99 user / 1 fee");
+    } else {
+        log("info", "Dev fee off");
+    }
+    log("info",
+        std::string("miner.ini  force_mine_m=") + std::to_string(settings_.force_mine_memory_cost) +
+            "  store_blocks=" + (settings_.store_blocks ? "true" : "false") +
+            "  xuni=" + (settings_.xuni_mining_enabled ? "true" : "false") +
+            "  submit=" + (settings_.submit_enabled ? "true" : "false") +
+            "  match_drain=" + (settings_.match_drain_enabled ? "true" : "false") +
+            "  warp_socks=" + (settings_.verify_warp_socks ? "true" : "false"));
+    if (settings_.xuni_mining_enabled) {
+        log("info", std::string("XUNI mining in window only — ") + XUNI_WINDOW_LABEL);
+    } else {
+        log("info", "XUNI mining OFF — GPU hunts XNM/XBLK only");
     }
 
     try {
@@ -1593,15 +1582,7 @@ void Supervisor::run(std::optional<int> max_seconds) {
         woody_->start();
     }
 
-    // CPU worker: consume desktop-backup drop lists. HTTP submit is off in bag-only.
-    consume_drop_list();
     start_submit_worker();
-    if (!settings_.bag_forward_url.empty()) {
-        bag_forward_ = std::make_unique<BagForwarder>(
-            *store_, settings_.bag_forward_url, settings_.bag_forward_token, settings_.worker,
-            settings_.bag_forward_batch, logger_.get());
-        bag_forward_->start();
-    }
     if (store_->pending_count() > 0) {
         log("info", "Resuming with " + std::to_string(store_->pending_count()) +
                         (bag_only() ? " queued block(s) — bag only, desktop backup submits"
@@ -1636,7 +1617,6 @@ void Supervisor::run(std::optional<int> max_seconds) {
         // Mining thread: network status + CUDA replan only. No HTTP submit here.
         refresh_network(false, /*replan_engine=*/true);
         update_match_drain(t);
-        maybe_check_update(t);
         maybe_reload_config(t);
         if (match_drain_active()) submit_cv_.notify_all();
 
