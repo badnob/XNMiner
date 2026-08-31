@@ -52,7 +52,7 @@ Once built, you can run the miner:
 ### 🐧 Linux
 For standard Linux installation:
 ```bash
-git clone https://github.com/badnob/xnminer-low-dif-hybrid-blackwell.git
+git clone https://github.com/badnob/XNMiner.git
 cd xnminer-low-dif-hybrid-blackwell
 chmod +x install-deps.sh build.sh start-miner.sh
 ./install-deps.sh
