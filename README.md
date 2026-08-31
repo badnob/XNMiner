@@ -22,18 +22,32 @@ A high-performance C++/CUDA miner designed for the **XenBlocks** network, utiliz
 ## 🛠 Installation & Setup
 
 ### 💻 Windows
-For users running the miner on a Windows environment:
-1. Navigate to the project directory:
-   `C:\Users\badnob\Desktop\xnminer-low-dif-hybrid-blackwell-main\xnminer-low-dif-hybrid-blackwell-main`
-2. Execute the prepared batch script:
-   ```cmd
-   .\start-miner.bat
-   ```
-   *Alternatively, if running from a vanilla build:*
-   ```cmd
-   .\build\bin\xnminer.exe
-   ```
-3. **⚙️ Configuration:** Reference `miner.ini` for all settings. Restart the miner after every change.
+For users running the miner on a Windows environment, follow these steps to build from source:
+
+#### 1. Prerequisites
+Ensure you have the following installed:
+*   **Visual Studio 2022** (with "Desktop development with C++" and "CUDA Toolkit" workloads)
+*   **CUDA Toolkit** (12.x or higher recommended for Blackwell support)
+*   **CMake** (3.18+)
+
+#### 2. Environment Setup
+Open the **Developer Command Prompt for VS 2022** (or the **x64 Native Tools Command Prompt**) to ensure the compiler environment is correctly initialized before building.
+
+#### 3. Build the Project
+Run the following commands from the project root:
+```batch
+mkdir build
+cd build
+cmake ..
+cmake --build . --config Release
+```
+
+#### 4. Execution
+Once built, you can run the miner:
+*   **Via Script:** `..\start-miner.bat`
+*   **Directly:** `.\build\bin\xnminer.exe`
+
+*Note: Reference `miner.ini` for all settings. Restart the miner after every change.*
 
 ### 🐧 Linux
 For standard Linux installation:
@@ -42,6 +56,7 @@ git clone https://github.com/badnob/xnminer-low-dif-hybrid-blackwell.git
 cd xnminer-low-dif-hybrid-blackwell
 chmod +x install-deps.sh build.sh start-miner.sh
 ./install-deps.sh
+./build.sh
 ./start-miner.sh
 ```
 

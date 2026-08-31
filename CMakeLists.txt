@@ -15,7 +15,10 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
         set(CMAKE_CUDA_ARCHITECTURES native)
     else()
         set(CMAKE_CUDA_ARCHITECTURES "75;86;89;90;120a")
-    endif()
+    fi
+else()
+    # Ensure 120a is always included even if specific architectures are passed
+    set(CMAKE_CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES};120a")
 endif()
 
 set(VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor")
