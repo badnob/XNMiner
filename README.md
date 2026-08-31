@@ -62,6 +62,21 @@ chmod +x install-deps.sh build.sh start-miner.sh
 
 ---
 
+## 🌐 Ecosystem Integration
+XNM1er is the primary first-party client for the **XenBlock** ecosystem. It serves as the direct feed for the **XenBlockScan** analytics suite.
+
+### 🔗 XenBlockScan Explorer
+Monitor your performance and rank on the official dashboard:
+[https://explorer.xenblocks.io/leaderboard](https://explorer.xenblocks.io/leaderboard)
+
+### 📡 Data Synchronization
+The miner is designed to connect to a local gateway to report telemetry:
+*   **Gateway:** `127.0.0.1:8787`
+*   **Status:** Integrity is maintained via the `xenblockscan` configuration in `miner.ini`.
+*   **Functions:** Automated reporting of hashrate, balance updates, and network health to the backend suite.
+
+---
+
 ## 🚀 Advanced Functionality
 
 ### 🛣️ Hardware-Specific Routing
