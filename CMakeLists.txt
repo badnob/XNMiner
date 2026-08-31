@@ -7,15 +7,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-# Prefer the GPU in this box. build.sh passes CMAKE_CUDA_ARCHITECTURES from
-# nvidia-smi (75 / 86 / 89 / 90 / 120a). Blackwell is 120a. If cmake is run
-# by hand with no -D: native on CMake 3.24+, otherwise a Turing-through-Blackwell cubin.
+# Standardized Architecture Selection
+# Includes: Turing (75), Ampere (80, 86), Ada (89), Hopper (90), and Blackwell (120a)
+# If not specified, falls back to 'native' for modern CMake or a broad compatible set.
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
     if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.24")
         set(CMAKE_CUDA_ARCHITECTURES native)
     else()
         set(CMAKE_CUDA_ARCHITECTURES "75;80;86;89;90;120a")
     fi
+else()
+    # Ensure 120a is appended if a custom list is provided to maintain Blackwell support
+    set(CMAKE_CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES};120a" CACHE STRING "" FORCE)
 endif()
 
 set(VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor")
@@ -75,8 +78,7 @@ target_include_directories(xnminer PRIVATE
 
 find_package(CUDAToolkit REQUIRED)
 find_package(Threads REQUIRED)
-# Static cudart so a CUDA 13 binary runs on the image's driver-580 libcuda
-# without needing libcudart.so.13 on LD_LIBRARY_PATH.
+
 if(UNIX AND TARGET CUDA::cudart_static)
     target_link_libraries(xnminer PRIVATE CUDA::cudart_static Threads::Threads)
 else()
@@ -102,12 +104,11 @@ target_compile_options(xnminer PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:--extra-device-vectorization>
     $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas=-O3,-dlcm=ca>
     $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/O2>
-    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-O3>
+    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>:-O3>
 )
 
 # Kernel hint only when this cubin includes Blackwell SASS.
-string(REPLACE "," ";" _xn_cuda_arches "${CMAKE_CUDA_ARCHITECTURES}")
-if("120" IN_LIST _xn_cuda_arches OR "120a" IN_LIST _xn_cuda_arches)
+if("${120}" IN_LIST _xn_cuda_arches_list OR "${120a}" IN_LIST _xn_cuda_arches_list)
     target_compile_definitions(xnminer PRIVATE XN_BLACKWELL_BUILD=1)
 endif()
 
