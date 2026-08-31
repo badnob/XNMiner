@@ -70,8 +70,8 @@ Monitor your performance and rank on the official dashboard:
 [https://explorer.xenblocks.io/leaderboard](https://explorer.xenblocks.io/leaderboard)
 
 ### 📡 Data Synchronization
-The miner is designed to connect to a local gateway to report telemetry:
-*   **Gateway:** `127.0.0.1:8787`
+The miner is designed to connect to the **XenBlockScan** gateway to report telemetry:
+*   **Gateway:** [https://xenblocks.online](https://xenblocks.online)
 *   **Status:** Integrity is maintained via the `xenblockscan` configuration in `miner.ini`.
 *   **Functions:** Automated reporting of hashrate, balance updates, and network health to the backend suite.
 
