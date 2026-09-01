@@ -1,115 +1,152 @@
-# 🚀 XNMiner (Hybrid-Blackwell Support)
+# XNMiner
 
-A high-performance C++/CUDA miner designed for the **XenBlocks** network, utilizing the **Argon2id** algorithm. It is optimized for modern NVIDIA architectures, including the **Blackwell** series.
+XNMiner is a C++/CUDA miner for the XenBlocks network. It targets NVIDIA GPUs and automatically tunes lanes, batch size, and keygen threads based on the hardware it finds at startup.
 
----
+## Highlights
 
-## ⚠️ Critical Warnings
-*   **🚫 Address Ban Risk:** Enabling **block_queue** (`store_blocks = true`) or **force mining** (`force_mine_memory_cost > 0`) can result in your payout address being **banned** if the pool detects non-compliant behavior.
-*   **🛡️ Safety Default:** System defaults are tuned for safe, live-network operation. Keep `store_blocks` at `false` unless you intentionally accept the risk of hardware-level rate-limits.
+- Native C++/CUDA implementation
+- Automatic GPU detection and runtime tuning
+- Fixed VRAM-based lane selection
+- Automatic batch sizing from available memory
+- Cross-platform source builds on Linux and Windows
+- Blackwell support with CUDA 13.x
 
----
+## Supported platforms
 
-## 💎 Key Features
-*   **🚀 Native Execution:** Pure C++/CUDA implementation; no Python runtime required.
-*   **🔋 Adaptive Memory:** Automatic `batch_size` calculation to utilize ~80% of available VRAM.
-*   **🛡️ Smart Verification:** Utilizes `POST /verify` for credits, with a fallback to the last-known good `m=` value if the primary difficulty feed is down.
-*   **🌡️ Hardware Resilience:** Built-in "memory-junior" thermal logic (Hold: 81°C / Cap: 85°C) and automatic GPU lane mapping.
-*   **⚡ Modern Support:** Native support for Turing, Ampere, Ada, Hopper, and **Blackwell (CUDA 120a)**.
+- Linux
+- Windows 10/11
 
----
+## Hardware requirements
 
-## 🛠 Installation & Setup
+- NVIDIA GPU with CUDA support
+- Recent NVIDIA driver
+- CUDA Toolkit
+- Sufficient system RAM and free disk space for build artifacts
 
-### 💻 Windows
-For users running the miner on a Windows environment, follow these steps to build from source:
+Blackwell GPUs use CUDA 13.x. On older architectures, the project may build with an earlier toolkit, but the recommended setup is always the newest supported CUDA release for your device.
 
-#### 1. Prerequisites
-Ensure you have the following installed:
-*   **Visual Studio 2022** (with "Desktop development with C++" and "CUDA Toolkit" workloads)
-*   **CUDA Toolkit** (12.x or higher recommended for Blackwell support)
-*   **CMake** (3.18+)
+## Build requirements
 
-#### 2. Environment Setup
-Open the **Developer Command Prompt for VS 2022** (or the **x64 Native Tools Command Prompt**) to ensure the compiler environment is correctly initialized before building.
+### Linux
 
-#### 3. Build the Project
-Run the following commands from the project root:
-```batch
-mkdir build
-cd build
-cmake ..
-cmake --build . --config Release
-```
+Install:
 
-#### 4. Execution
-Once built, you can run the miner:
-*   **Via Script:** `..\start-miner.bat`
-*   **Directly:** `.\build\bin\xnminer.exe`
+- g++ or clang++
+- CMake
+- Ninja
+- pkg-config
+- libcurl development headers
+- NVIDIA proprietary driver
+- CUDA Toolkit with nvcc
 
-*Note: Reference `miner.ini` for all settings. Restart the miner after every change.*
+The repository includes `install-deps.sh` to install the common Linux build dependencies.
 
-### 🐧 Linux
-For standard Linux installation:
+### Windows
+
+Install:
+
+- Visual Studio 2022 Build Tools or Visual Studio 2022
+- Desktop development with C++
+- CMake
+- Ninja
+- NVIDIA driver
+- CUDA Toolkit with nvcc
+
+Use the Visual Studio x64 native tools environment, or the provided `build.ps1` script.
+
+## Build instructions
+
+### Linux
+
+From the project root:
+
 ```bash
-git clone https://github.com/badnob/XNMiner.git
-cd XNMiner
-chmod +x install-deps.sh build.sh start-miner.sh
 ./install-deps.sh
 ./build.sh
+```
+
+The binary is written to:
+
+```bash
+build/bin/xnminer
+```
+
+To start the miner:
+
+```bash
 ./start-miner.sh
 ```
 
----
+### Windows
 
-## 🌐 Ecosystem Integration
-XNM1er is the primary first-party client for the **XenBlock** ecosystem. It serves as the direct feed for the **XenBlockScan** analytics suite.
+From the project root:
 
-### 🔗 XenBlockScan Explorer
-Monitor your performance and rank on the official dashboard:
-[https://explorer.xenblocks.io/leaderboard](https://explorer.xenblocks.io/leaderboard)
+```bat
+build.ps1
+```
 
-### 📡 Data Synchronization
-The miner is designed to connect to the **XenBlockScan** gateway to report telemetry:
-*   **Gateway:** [https://xenblocks.online](https://xenblocks.online)
-*   **Status:** Integrity is maintained via the `xenblockscan` configuration in `miner.ini`.
-*   **Functions:** Automated reporting of hashrate, balance updates, and network health to the backend suite.
+Or use the batch launcher:
 
----
+```bat
+Start-Miner.bat
+```
 
-## 🚀 Advanced Functionality
+The launcher will build the miner first if `build/bin/xnminer.exe` is missing.
 
-### 🛣️ Hardware-Specific Routing
-*   **Dynamic Lane Mapping:** 
-    *   128 GB $\rightarrow$ 32 | 64 GB $\rightarrow$ 16 | 32 GB $\rightarrow$ 8 | 16 GB $\rightarrow$ 4 | 8 GB $\rightarrow$ 2 | 4-6 GB $\rightarrow$ 1
-*   **Blackwell Optimization:** Specifically optimized for CUDA 120a.
-*   **Automatic Scaling:** `batch_size = 0` triggers the automatic VRAM occupancy calc.
+## Hardware auto-detection
 
-### 🌐 Networking Logic
-*   **Verification Proxy:** Optionally route `verify` traffic through a SOCKS/WARP proxy while keeping other traffic on the local IP.
-*   **📊 TUI Integration:** Real-time telemetry including hashrate, temperatures, and **XenBlocks** status.
+At startup, the miner detects the installed GPU, VRAM size, and CPU core count, then chooses conservative defaults for:
 
----
+- CUDA lane count
+- batch size
+- keygen thread count
 
-## ⚙️ Configuration (miner.ini)
-The `miner.ini` file is the source of truth. **Always restart the miner after editing.**
+The goal is to get a strong first-run configuration without manual tuning. Users can still adjust `miner.ini` later if they want to override the defaults.
 
-| Parameter | Default | Description |
-| --- | --- | --- |
-| `force_mine_memory_cost` | 0 | Leave at 0 to prevent address banning. |
-| `store_blocks` | false | Keep false for standard operation. |
-| `dev_fee` | true | Set to `false` to disable the 1% developer fee. |
+You can preview the detected configuration with:
 
----
+```bash
+bash scripts/detect-hardware.sh
+```
 
-## 📡 Network & Explorer
-| Endpoint | Role | Description |
-| --- | --- | --- |
-| **GET** `/difficulty` | Live $m=$ | Primary heart-beat for the mining loop. |
-| **POST** `/verify` | Crediting | Verifies completed work with the network. |
-| **Leadership** | Dashboard | View your rank on the [XenBlocks Explorer](https://explorer.xenblocks.io/leaderboard). |
+or:
 
----
+```bash
+./build/bin/xnminer --diagnose
+```
 
-**Requirements:** NVIDIA Turing or newer.
-**Optimizations:** CUDA 120a (Blackwell) fully supported.
+## Configuration
+
+`miner.ini` is the source of truth for runtime settings. Restart the miner after editing it.
+
+Important settings include:
+
+- `force_mine_memory_cost = 0` — keep this at zero for normal use
+- `store_blocks = false` — recommended for standard operation
+- `max_lanes = 0` — auto-select lanes from VRAM
+- `batch_size = 0` — auto-select batch size from available VRAM
+
+## Notes on safety and performance
+
+- The project is designed to tune itself from the local hardware profile.
+- Build on the machine that will mine whenever possible.
+- If you update drivers or the CUDA Toolkit, rebuild the project afterwards.
+- If the miner starts with unexpected performance, confirm that the correct binary was built for the local GPU and that `miner.ini` does not contain stale overrides.
+
+## Troubleshooting
+
+- `nvidia-smi` must work before you build or run the miner.
+- `nvcc --version` must report the installed CUDA Toolkit.
+- If Windows fails to build, confirm that Visual Studio C++ tools, CMake, Ninja, and the CUDA Toolkit are installed.
+- If Linux fails to build, confirm that the CUDA Toolkit and the development packages listed above are present.
+
+## Optional networking tools
+
+The repository also includes optional scripts for users who need them:
+
+- `scripts/verify-warp-socks.sh` for a local SOCKS proxy used by `/verify`
+- `scripts/xnminer.service` for systemd-based service installs on Linux
+
+## License
+
+Refer to the repository for licensing details.
