@@ -62,6 +62,8 @@ Use the Visual Studio x64 native tools environment, or the provided `build.ps1` 
 
 From the project root:
 
+For native Linux builds:
+
 ```bash
 ./install-deps.sh
 ./build.sh
@@ -70,7 +72,7 @@ From the project root:
 Quick install or update from an existing clone:
 
 ```bash
-git pull --rebase && ./install-deps.sh && ./build.sh
+git pull --rebase && chmod +x install-deps.sh build.sh start-miner.sh && ./install-deps.sh && ./build.sh
 ```
 
 Fresh clone and build in one pass:
@@ -79,17 +81,13 @@ Fresh clone and build in one pass:
 git clone https://github.com/badnob/XNMiner.git && cd XNMiner && chmod +x install-deps.sh build.sh start-miner.sh && ./install-deps.sh && ./build.sh
 ```
 
-The binary is written to:
+WSL2 note:
 
-```bash
-build/bin/xnminer
-```
-
-To start the miner:
-
-```bash
-./start-miner.sh
-```
+- Install the NVIDIA Windows driver on the host first.
+- Do not install a Linux display driver inside WSL.
+- Install the CUDA Toolkit for Linux inside the WSL distro so `nvcc --version` works.
+- `install-deps.sh` installs only the Linux build packages; it does not install CUDA itself.
+- See NVIDIA's CUDA on WSL guide for the supported setup flow.
 
 ### Windows
 
