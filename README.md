@@ -39,6 +39,8 @@ Install:
 - NVIDIA proprietary driver
 - CUDA Toolkit with nvcc
 
+If you are building under WSL2, the Windows NVIDIA driver must support WSL and `nvcc` must be installed inside the Linux environment. `install-deps.sh` only installs the host build packages; it does not install CUDA itself.
+
 The repository includes `install-deps.sh` to install the common Linux build dependencies.
 
 ### Windows
@@ -148,9 +150,9 @@ Important settings include:
 ## Troubleshooting
 
 - `nvidia-smi` must work before you build or run the miner.
-- `nvcc --version` must report the installed CUDA Toolkit.
+- `nvcc --version` must report the installed CUDA Toolkit. If it does not, install CUDA Toolkit before building.
 - If Windows fails to build, confirm that Visual Studio C++ tools, CMake, Ninja, and the CUDA Toolkit are installed.
-- If Linux fails to build, confirm that the CUDA Toolkit and the development packages listed above are present.
+- If Linux or WSL fails to build, confirm that the CUDA Toolkit is installed inside the Linux environment and that the development packages listed above are present.
 
 ## Optional networking tools
 
