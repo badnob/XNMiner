@@ -65,6 +65,18 @@ From the project root:
 ./build.sh
 ```
 
+Quick install or update from an existing clone:
+
+```bash
+git pull --rebase && ./install-deps.sh && ./build.sh
+```
+
+Fresh clone and build in one pass:
+
+```bash
+git clone https://github.com/badnob/XNMiner.git && cd XNMiner && ./install-deps.sh && ./build.sh
+```
+
 The binary is written to:
 
 ```bash
