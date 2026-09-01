@@ -74,7 +74,7 @@ git pull --rebase && ./install-deps.sh && ./build.sh
 Fresh clone and build in one pass:
 
 ```bash
-git clone https://github.com/badnob/XNMiner.git && cd XNMiner && ./install-deps.sh && ./build.sh
+git clone https://github.com/badnob/XNMiner.git && cd XNMiner && chmod +x install-deps.sh build.sh start-miner.sh && ./install-deps.sh && ./build.sh
 ```
 
 The binary is written to:
