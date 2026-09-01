@@ -1,115 +1,93 @@
-# How to run — Linux CUDA xnminer
+# XNMiner build and first-run guide
 
-## 1. Host packages
+## Linux
+
+Install the host build packages:
 
 ```bash
 ./install-deps.sh
 ```
 
-Needs: **g++**, **CMake**, **Ninja**, **pkg-config**, **libcurl**.
+You still need an NVIDIA driver in the Linux environment. `install-deps.sh` installs the CUDA Toolkit on apt-based Linux systems when `nvcc` is missing.
 
-## 2. NVIDIA stack
-
-1. Install the NVIDIA proprietary driver until `nvidia-smi` lists your GPU.
-2. Install the CUDA Toolkit so `nvcc --version` works.
-3. If `nvcc` is missing from `PATH`:
+If `nvcc` is not on PATH:
 
 ```bash
 export PATH=/usr/local/cuda/bin:$PATH
 export LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}
 ```
 
-## 3. Build
+Build from the project root:
 
 ```bash
-bash scripts/detect-hardware.sh   # optional preview: GPU, SM, VRAM, CPU, lanes, batch
 ./build.sh
 ```
 
-Output: `build/bin/xnminer`
+Optional hardware preview:
 
-The script picks `CMAKE_CUDA_ARCHITECTURES` from `nvidia-smi` compute capability **on this box** and writes `data/build_hw`. Lanes come from a **fixed VRAM table**; only batch size is measured at start (`max_lanes = 0`, `batch_size = 0`).
+```bash
+bash scripts/detect-hardware.sh
+```
 
-| Total VRAM | Lanes |
-|------------|-------|
-| 128 GB | 32 |
-| 64 GB | 16 |
-| 32 GB | 8 |
-| 16 GB | 4 |
-| 8 GB | 2 |
-| 4–6 GB | 1 |
+Output:
 
-Blackwell installs CUDA 13 nvcc when missing (faster SASS). 30/40-series keep CUDA 12.x. Pascal / Maxwell will not build.
+```text
+build/bin/xnminer
+```
 
-Blackwell is **sm_120a**. Override: `CMAKE_CUDA_ARCHITECTURES=86 ./build.sh` or `CMAKE_CUDA_ARCHITECTURES=120a ./build.sh`.
+On Blackwell, the build targets `sm_120a` and expects a CUDA 13-capable toolkit.
 
-## 4. First start (new wallet)
+WSL2:
+
+- Install the NVIDIA Windows driver on the host first.
+- Do not install a Linux GPU driver inside WSL.
+- Install the Linux CUDA Toolkit inside the WSL distro so `nvcc --version` works.
+- `install-deps.sh` installs host packages and, on apt-based Linux systems, the CUDA Toolkit if `nvcc` is missing.
+
+## Windows
+
+Install:
+
+- Visual Studio 2022 Build Tools, or Visual Studio 2022
+- Desktop development with C++
+- CMake
+- Ninja
+- NVIDIA driver
+- CUDA Toolkit with `nvcc`
+
+Build from the project root:
+
+```powershell
+build.ps1
+```
+
+Or start the miner directly:
+
+```bat
+Start-Miner.bat
+```
+
+If the executable is missing, the launcher builds it first.
+
+## First run
+
+Run:
 
 ```bash
 ./start-miner.sh
 ```
 
-1. Enter your `0x` wallet when asked (saved to `miner.ini`).
-2. Enter a miner name, or press Enter for `xnminer-xxxxxxxx`.
-3. Watch the live dashboard (H/s, accepts, temp, VRAM, lanes).
-4. **Ctrl+C** in the TUI stops mining and bags the queue for the next start.
+or on Windows:
 
-There is no pre-filled address, worker, Woodyminer name, tracker id, lock, or queue.
-
-## 5. Config
-
-Edit `miner.ini`, then **restart xnminer** to apply:
-
-- `[account] address` / `worker`
-- `[cuda] max_lanes` / `batch_size` — **0** = auto from VRAM. `keygen_threads = 12`
-- `[queue] desktop_cpu_cores = 0`
-- `[efficiency]` VRAM 80%, mem-junc 85/81, miner power-limit **off**
-- `[mining] force_mine_memory_cost = 0` — follow live `/difficulty`. `store_blocks = false` — do not bag hashes for later.
-- `POST /verify` still runs if `GET /difficulty` is down, using last-good m=.
-- `[mining] xuni_mining_enabled = true` — hunt XUNI only in the `:55–:04` window
-- `[server] verify_proxy` — optional SOCKS/HTTP for `POST /verify` only
-
-## Checks
-
-| Check | Where |
-|-------|--------|
-| Detected GPU / CPU / lanes | `bash scripts/detect-hardware.sh` or `./build/bin/xnminer --diagnose` |
-| Hashrate | Dashboard H/s |
-| Accepts | Accepted counters |
-| Logs | `data/session.log` |
-| What this binary was built for | `data/build_hw` |
-| Remote | woodyminer.com (on by default) |
-
-## Common issues
-
-| Problem | Fix |
-|---------|-----|
-| Build fails | `./install-deps.sh`; install CUDA Toolkit |
-| `nvcc not found` | Add `/usr/local/cuda/bin` to `PATH` |
-| CUDA start failed | Update NVIDIA driver; `bash scripts/detect-hardware.sh` then rebuild |
-| Wrong SM cubin | Delete `build/` and run `./build.sh` on the box that will mine |
-| Pascal / 10-series | Not supported (needs Turing sm_75 or newer) |
-| Power limit fails | Run as root, or skip `gpu_power_boost_enabled` |
-| Another instance | Close the other miner or delete `data/miner.lock` |
-| Woodyminer HTTPS fails | Confirm `libcurl` is the OpenSSL build (`libcurl4-openssl-dev`) |
-
-## Optional: WARP SOCKS for `/verify`
-
-```bash
-bash scripts/verify-warp-socks.sh
+```bat
+Start-Miner.bat
 ```
 
-Then set in `miner.ini`:
+The miner detects the local GPU, VRAM, and CPU cores at startup and selects conservative defaults automatically.
 
-```ini
-verify_warp_socks = true
-verify_proxy = socks5h://127.0.0.1:40000
-```
+## Common failures
 
-Restart the miner. Confirm in `data/session.log`: `POST /verify via proxy socks5h://127.0.0.1:40000`.
-
-## Optional: systemd
-
-1. Put a wallet in `miner.ini` first (no interactive prompt under systemd).
-2. Copy `scripts/xnminer.service` to `/etc/systemd/system/` and edit `WorkingDirectory` / `ExecStart`.
-3. `sudo systemctl enable --now xnminer`
+- `nvidia-smi` not found: install the NVIDIA driver first.
+- `nvcc` not found: rerun `./install-deps.sh` on an apt-based Linux system, or install the CUDA Toolkit manually, then rebuild.
+- CMake cannot find CUDA: the toolkit is not installed in the current environment.
+- Windows build fails: confirm Visual Studio C++ tools, CMake, Ninja, and CUDA Toolkit are installed.

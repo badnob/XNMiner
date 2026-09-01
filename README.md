@@ -39,9 +39,9 @@ Install:
 - NVIDIA proprietary driver
 - CUDA Toolkit with nvcc
 
-If you are building under WSL2, the Windows NVIDIA driver must support WSL and `nvcc` must be installed inside the Linux environment. `install-deps.sh` only installs the host build packages; it does not install CUDA itself.
+If you are building under WSL2, the Windows NVIDIA driver must support WSL and `nvcc` must be available inside the Linux environment. `install-deps.sh` now installs the Linux build packages and will also install the CUDA Toolkit on apt-based Linux systems when `nvcc` is missing.
 
-The repository includes `install-deps.sh` to install the common Linux build dependencies.
+The repository includes `install-deps.sh` to install the common Linux build dependencies and, on apt-based Linux systems, the CUDA Toolkit as well.
 
 ### Windows
 
@@ -86,7 +86,7 @@ WSL2 note:
 - Install the NVIDIA Windows driver on the host first.
 - Do not install a Linux display driver inside WSL.
 - Install the CUDA Toolkit for Linux inside the WSL distro so `nvcc --version` works.
-- `install-deps.sh` installs only the Linux build packages; it does not install CUDA itself.
+- `install-deps.sh` installs the Linux build packages and, on apt-based Linux systems, the CUDA Toolkit if `nvcc` is missing.
 - See NVIDIA's CUDA on WSL guide for the supported setup flow.
 
 ### Windows
@@ -150,7 +150,7 @@ Important settings include:
 - `nvidia-smi` must work before you build or run the miner.
 - `nvcc --version` must report the installed CUDA Toolkit. If it does not, install CUDA Toolkit before building.
 - If Windows fails to build, confirm that Visual Studio C++ tools, CMake, Ninja, and the CUDA Toolkit are installed.
-- If Linux or WSL fails to build, confirm that the CUDA Toolkit is installed inside the Linux environment and that the development packages listed above are present.
+- If Linux or WSL fails to build, confirm that the CUDA Toolkit is installed inside the Linux environment and that the development packages listed above are present. On apt-based Linux, `./install-deps.sh` should handle this for you.
 
 ## Optional networking tools
 
